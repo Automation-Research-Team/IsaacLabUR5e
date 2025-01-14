@@ -45,7 +45,7 @@ params:
   load_path: ""
 
   config:
-    name: Factory
+    name: FactoryUR5e
     device: cuda:0
     full_experiment_name: test
     env_name: rlgpu

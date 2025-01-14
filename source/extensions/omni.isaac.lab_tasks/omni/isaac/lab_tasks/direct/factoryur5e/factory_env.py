@@ -17,13 +17,13 @@ from omni.isaac.lab.utils.assets import ISAAC_NUCLEUS_DIR
 from omni.isaac.lab.utils.math import axis_angle_from_quat
 
 from . import factory_control as fc
-from .factory_env_cfg import OBS_DIM_CFG, STATE_DIM_CFG, FactoryEnvCfg
+from .factory_env_cfg import OBS_DIM_CFG, STATE_DIM_CFG, FactoryUR5eEnvCfg
 
 
 class FactoryUR5eEnv(DirectRLEnv):
-    cfg: FactoryEnvCfg
+    cfg: FactoryUR5eEnvCfg
 
-    def __init__(self, cfg: FactoryEnvCfg, render_mode: str | None = None, **kwargs):
+    def __init__(self, cfg: FactoryUR5eEnvCfg, render_mode: str | None = None, **kwargs):
         # Update number of obs/states
         cfg.observation_space = sum([OBS_DIM_CFG[obs] for obs in cfg.obs_order])
         cfg.state_space = sum([STATE_DIM_CFG[state] for state in cfg.state_order])

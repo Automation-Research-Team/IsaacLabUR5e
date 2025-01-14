@@ -12,6 +12,7 @@ from omni.isaac.lab.scene import InteractiveSceneCfg
 from omni.isaac.lab.sim import PhysxCfg, SimulationCfg
 from omni.isaac.lab.sim.spawners.materials.physics_materials_cfg import RigidBodyMaterialCfg
 from omni.isaac.lab.utils import configclass
+from gym.spaces import Space
 
 from .factory_tasks_cfg import ASSET_DIR, FactoryUR5eTask, GearMesh, NutThread, PegInsert
 
@@ -70,11 +71,11 @@ class CtrlCfg:
 
 @configclass
 class FactoryUR5eEnvCfg(DirectRLEnvCfg):
-    decimation = 8
-    action_space = 6
+    decimation: int = 8
+    action_space: int = 6
     # num_*: will be overwritten to correspond to obs_order, state_order.
-    observation_space = 21
-    state_space = 72
+    observation_space: int = 21
+    state_space: int = 72
     obs_order: list[str] = ["fingertip_pos_rel_fixed", "fingertip_quat", "ee_linvel", "ee_angvel"]
     state_order: list[str] = [
         "fingertip_pos",

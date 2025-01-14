@@ -101,7 +101,7 @@ class Hole8mm(FixedAssetCfg):
 
 
 @configclass
-class PegInsert(FactoryTask):
+class PegInsert(FactoryUR5eTask):
     name = "peg_insert"
     fixed_asset_cfg = Hole8mm()
     held_asset_cfg = Peg8mm()
@@ -202,7 +202,7 @@ class MediumGear(HeldAssetCfg):
 
 
 @configclass
-class GearMesh(FactoryTask):
+class GearMesh(FactoryUR5eTask):
     name = "gear_mesh"
     fixed_asset_cfg = GearBase()
     held_asset_cfg = MediumGear()
@@ -361,7 +361,7 @@ class BoltM16(FixedAssetCfg):
 
 
 @configclass
-class NutThread(FactoryTask):
+class NutThread(FactoryUR5eTask):
     name = "nut_thread"
     fixed_asset_cfg = BoltM16()
     held_asset_cfg = NutM16()

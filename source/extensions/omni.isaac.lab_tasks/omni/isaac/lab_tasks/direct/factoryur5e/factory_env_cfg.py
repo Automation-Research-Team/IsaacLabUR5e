@@ -75,8 +75,8 @@ class FactoryUR5eEnvCfg(DirectRLEnvCfg):
     # num_*: will be overwritten to correspond to obs_order, state_order.
     observation_space = 21
     state_space = 72
-    obs_order: list = ["fingertip_pos_rel_fixed", "fingertip_quat", "ee_linvel", "ee_angvel"]
-    state_order: list = [
+    obs_order: list[str] = ["fingertip_pos_rel_fixed", "fingertip_quat", "ee_linvel", "ee_angvel"]
+    state_order: list[str] = [
         "fingertip_pos",
         "fingertip_quat",
         "ee_linvel",

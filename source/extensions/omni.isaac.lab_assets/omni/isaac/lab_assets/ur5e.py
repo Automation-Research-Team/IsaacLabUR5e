@@ -16,8 +16,7 @@ Reference: https://github.com/frankaemika/franka_ros
 import omni.isaac.lab.sim as sim_utils
 from omni.isaac.lab.actuators import ImplicitActuatorCfg
 from omni.isaac.lab.assets.articulation import ArticulationCfg
-#from omni.isaac.lab.utils.assets import ISAACLAB_NUCLEUS_DIR
-import os
+from . import ISAACLAB_ASSETS_DATA_DIR
 
 ##
 # Configuration
@@ -25,7 +24,7 @@ import os
 
 UR5E_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{os.getcwd()}/source/extensions/omni.isaac.lab_assets/omni/isaac/models/models/ur5e_rl_libre.usd",
+        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/factoryur5e/ur5e_rl_libre.usd",
         activate_contact_sensors=False,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,

@@ -207,6 +207,11 @@ class FactoryEnv(DirectRLEnv):
         self.left_finger_jacobian = jacobians[:, self.left_finger_body_idx - 1, 0:6, 0:7]
         self.right_finger_jacobian = jacobians[:, self.right_finger_body_idx - 1, 0:6, 0:7]
         self.fingertip_midpoint_jacobian = (self.left_finger_jacobian + self.right_finger_jacobian) * 0.5
+
+        self.fingertip_midpoint_jacobian_analytical = fc.get_analytic_jacobian(self.fingertip_midpoint_quat, 
+                                                                               self.fingertip_midpoint_jacobian, 
+                                                                               self.num_envs, self.device)
+
         self.arm_mass_matrix = self._robot.root_physx_view.get_mass_matrices()[:, 0:7, 0:7]
         self.joint_pos = self._robot.data.joint_pos.clone()
         self.joint_vel = self._robot.data.joint_vel.clone()
@@ -388,6 +393,7 @@ class FactoryEnv(DirectRLEnv):
         )
 
         self.ctrl_target_gripper_dof_pos = 0.0
+
         self.generate_ctrl_signals()
 
     def _set_gains(self, prop_gains, rot_deriv_scale=1.0):
@@ -398,29 +404,30 @@ class FactoryEnv(DirectRLEnv):
 
     def generate_ctrl_signals(self):
         """Get Jacobian. Set Franka DOF position targets (fingers) or DOF torques (arm)."""
-        self.joint_torque, self.applied_wrench = fc.compute_dof_torque(
-            cfg=self.cfg,
-            dof_pos=self.joint_pos,
-            dof_vel=self.joint_vel,  # _fd,
+
+        pos_error, axis_angle_error = fc.get_pose_error(
             fingertip_midpoint_pos=self.fingertip_midpoint_pos,
             fingertip_midpoint_quat=self.fingertip_midpoint_quat,
-            fingertip_midpoint_linvel=self.ee_linvel_fd,
-            fingertip_midpoint_angvel=self.ee_angvel_fd,
-            jacobian=self.fingertip_midpoint_jacobian,
-            arm_mass_matrix=self.arm_mass_matrix,
             ctrl_target_fingertip_midpoint_pos=self.ctrl_target_fingertip_midpoint_pos,
             ctrl_target_fingertip_midpoint_quat=self.ctrl_target_fingertip_midpoint_quat,
-            task_prop_gains=self.task_prop_gains,
-            task_deriv_gains=self.task_deriv_gains,
+            jacobian_type="analytic",
+            rot_error_type="axis_angle",
+            )
+        
+        delta_fingertip_pose = torch.cat((pos_error, axis_angle_error), dim=1) 
+        
+        delta_arm_dof_pos = fc.get_delta_dof_pos(
+            delta_pose=delta_fingertip_pose, 
+            ik_method="dls", 
+            jacobian=self.fingertip_midpoint_jacobian_analytical, 
             device=self.device,
         )
-
+        
         # set target for gripper joints to use physx's PD controller
-        self.ctrl_target_joint_pos[:, 7:9] = self.ctrl_target_gripper_dof_pos
-        self.joint_torque[:, 7:9] = 0.0
+        self.ctrl_target_joint_pos[:, 7:9] =  self.ctrl_target_gripper_dof_pos
+        self.ctrl_target_joint_pos[:, 0:7] = self.joint_pos[:, 0:7] + delta_arm_dof_pos
 
         self._robot.set_joint_position_target(self.ctrl_target_joint_pos)
-        self._robot.set_joint_effort_target(self.joint_torque)
 
     def _get_dones(self):
         """Update intermediate values used for rewards and observations."""
@@ -582,7 +589,7 @@ class FactoryEnv(DirectRLEnv):
             delta_hand_pose = torch.cat((pos_error, axis_angle_error), dim=-1)
 
             # Solve DLS problem.
-            delta_dof_pos = fc._get_delta_dof_pos(
+            delta_dof_pos = fc.get_delta_dof_pos(
                 delta_pose=delta_hand_pose,
                 ik_method="dls",
                 jacobian=self.fingertip_midpoint_jacobian[env_ids],

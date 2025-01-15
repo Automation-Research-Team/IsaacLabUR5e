@@ -12,8 +12,9 @@ from omni.isaac.lab.scene import InteractiveSceneCfg
 from omni.isaac.lab.sim import PhysxCfg, SimulationCfg
 from omni.isaac.lab.sim.spawners.materials.physics_materials_cfg import RigidBodyMaterialCfg
 from omni.isaac.lab.utils import configclass
+from omni.isaac.lab_assets import ISAACLAB_ASSETS_DATA_DIR
 
-from .factory_tasks_cfg import ASSET_DIR, FactoryUR5eTask, GearMesh, NutThread, PegInsert
+from .factory_tasks_cfg import FactoryUR5eTask, GearMesh, NutThread, PegInsert
 
 OBS_DIM_CFG = {
     "fingertip_pos": 3,
@@ -70,11 +71,11 @@ class CtrlCfg:
 
 @configclass
 class FactoryUR5eEnvCfg(DirectRLEnvCfg):
-    decimation = 8
-    action_space = 6
+    decimation: int = 8
+    action_space: int = 6
     # num_*: will be overwritten to correspond to obs_order, state_order.
-    observation_space = 21
-    state_space = 72
+    observation_space: int = 21
+    state_space: int = 72
     obs_order: list[str] = ["fingertip_pos_rel_fixed", "fingertip_quat", "ee_linvel", "ee_angvel"]
     state_order: list[str] = [
         "fingertip_pos",
@@ -121,7 +122,7 @@ class FactoryUR5eEnvCfg(DirectRLEnvCfg):
     robot = ArticulationCfg(
         prim_path="/World/envs/env_.*/ur5e",
         spawn=sim_utils.UsdFileCfg(
-            usd_path=f"{os.getcwd()}/source/extensions/omni.isaac.lab_assets/omni/isaac/models/ur5e_rl_libre.usd",
+            usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/factoryur5e/ur5e_rl_libre.usd",
             activate_contact_sensors=True,
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 disable_gravity=True,

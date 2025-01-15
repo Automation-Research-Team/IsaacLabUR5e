@@ -15,6 +15,7 @@ from omni.isaac.lab.envs import DirectRLEnv
 from omni.isaac.lab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from omni.isaac.lab.utils.assets import ISAAC_NUCLEUS_DIR
 from omni.isaac.lab.utils.math import axis_angle_from_quat
+from omni.isaac.lab_tasks.direct.factoryur5e.factory_tasks_cfg import BoltM16, GearBase, GearMesh, NutThread
 
 from . import factory_control as fc
 from .factory_env_cfg import OBS_DIM_CFG, STATE_DIM_CFG, FactoryUR5eEnvCfg
@@ -133,13 +134,16 @@ class FactoryUR5eEnv(DirectRLEnv):
         self.fixed_success_pos_local = torch.zeros((self.num_envs, 3), device=self.device)
         if self.cfg_task.name == "peg_insert":
             self.fixed_success_pos_local[:, 2] = 0.0
-        elif self.cfg_task.name == "gear_mesh":
+        elif self.cfg_task.name == "gear_mesh" and type(self.cfg_task) == GearMesh:
             gear_base_offset = self._get_target_gear_base_offset()
             self.fixed_success_pos_local[:, 0] = gear_base_offset[0]
             self.fixed_success_pos_local[:, 2] = gear_base_offset[2]
-        elif self.cfg_task.name == "nut_thread":
+        elif self.cfg_task.name == "nut_thread" and type(self.cfg_task) == NutThread:
+            self.cfg_task.fixed_asset_cfg = self.cfg_task.fixed_asset_cfg
             head_height = self.cfg_task.fixed_asset_cfg.base_height
             shank_length = self.cfg_task.fixed_asset_cfg.height
+            if type(self.cfg_task.fixed_asset_cfg) != BoltM16:
+                raise TypeError(f"Expected fixed asset to be of type BoltM16 got : {type(self.cfg_task.fixed_asset_cfg)}")
             thread_pitch = self.cfg_task.fixed_asset_cfg.thread_pitch
             self.fixed_success_pos_local[:, 2] = head_height + shank_length - thread_pitch * 1.5
         else:
@@ -166,9 +170,13 @@ class FactoryUR5eEnv(DirectRLEnv):
         )
 
         self._robot = Articulation(self.cfg.robot)
+        if self.cfg_task.fixed_asset is None:
+            raise ValueError("fixed_asset Articulation instance was not set")
         self._fixed_asset = Articulation(self.cfg_task.fixed_asset)
+        if self.cfg_task.held_asset is None:
+            raise ValueError("held_asset Articulation instance was not set")
         self._held_asset = Articulation(self.cfg_task.held_asset)
-        if self.cfg_task.name == "gear_mesh":
+        if self.cfg_task.name == "gear_mesh" and type(self.cfg_task) == GearMesh:
             self._small_gear_asset = Articulation(self.cfg_task.small_gear_cfg)
             self._large_gear_asset = Articulation(self.cfg_task.large_gear_cfg)
 
@@ -440,7 +448,7 @@ class FactoryUR5eEnv(DirectRLEnv):
         fixed_cfg = self.cfg_task.fixed_asset_cfg
         if self.cfg_task.name == "peg_insert" or self.cfg_task.name == "gear_mesh":
             height_threshold = fixed_cfg.height * success_threshold
-        elif self.cfg_task.name == "nut_thread":
+        elif self.cfg_task.name == "nut_thread" and type(fixed_cfg) == BoltM16:
             height_threshold = fixed_cfg.thread_pitch * success_threshold
         else:
             raise NotImplementedError("Task not implemented")
@@ -538,7 +546,12 @@ class FactoryUR5eEnv(DirectRLEnv):
 
     def _get_target_gear_base_offset(self):
         """Get offset of target gear from the gear base asset."""
+        if type(self.cfg_task) != GearMesh:
+            raise TypeError(f"Expected GearMesh task, got : {self.cfg_task.name}")
         target_gear = self.cfg_task.target_gear
+        if type(self.cfg_task.fixed_asset_cfg) != GearBase:
+            raise TypeError(f"Expected fixed asset to be of type GearBase got : {type(self.cfg_task.fixed_asset_cfg)}")
+        
         if target_gear == "gear_large":
             gear_base_offset = self.cfg_task.fixed_asset_cfg.large_gear_base_offset
         elif target_gear == "gear_medium":
@@ -768,7 +781,7 @@ class FactoryUR5eEnv(DirectRLEnv):
         self.step_sim_no_action()
 
         # Add flanking gears after servo (so arm doesn't move them).
-        if self.cfg_task.name == "gear_mesh" and self.cfg_task.add_flanking_gears:
+        if self.cfg_task.name == "gear_mesh" and type(self.cfg_task) == GearMesh and self.cfg_task.add_flanking_gears:
             small_gear_state = self._small_gear_asset.data.default_root_state.clone()[env_ids]
             small_gear_state[:, 0:6] = fixed_state[:, 0:6]
             small_gear_state[:, 6:] = 0.0  # vel

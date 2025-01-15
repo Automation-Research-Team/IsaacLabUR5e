@@ -44,7 +44,9 @@ class FactoryUR5eTask:
     duration_s = 5.0
 
     fixed_asset_cfg: FixedAssetCfg = FixedAssetCfg()
+    fixed_asset: ArticulationCfg | None = None # Instantiated by each task
     held_asset_cfg: HeldAssetCfg = HeldAssetCfg()
+    held_asset: ArticulationCfg | None = None # Instantiated by each task
     asset_size: float = 0.0
 
     # Robot

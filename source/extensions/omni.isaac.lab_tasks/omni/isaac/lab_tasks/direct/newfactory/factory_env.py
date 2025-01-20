@@ -15,6 +15,7 @@ from omni.isaac.lab.envs import DirectRLEnv
 from omni.isaac.lab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from omni.isaac.lab.utils.assets import ISAAC_NUCLEUS_DIR
 from omni.isaac.lab.utils.math import axis_angle_from_quat
+from omni.isaac.lab_tasks.direct.newfactory.factory_tasks_cfg import BoltM16, NutThread
 
 from . import factory_control as fc
 from .factory_env_cfg import OBS_DIM_CFG, STATE_DIM_CFG, FactoryEnvCfg
@@ -90,13 +91,7 @@ class FactoryEnv(DirectRLEnv):
 
         # Held asset
         held_base_x_offset = 0.0
-        if self.cfg_task.name == "peg_insert":
-            held_base_z_offset = 0.0
-        elif self.cfg_task.name == "gear_mesh":
-            gear_base_offset = self._get_target_gear_base_offset()
-            held_base_x_offset = gear_base_offset[0]
-            held_base_z_offset = gear_base_offset[2]
-        elif self.cfg_task.name == "nut_thread":
+        if self.cfg_task.name == "nut_thread":
             held_base_z_offset = self.cfg_task.fixed_asset_cfg.base_height
         else:
             raise NotImplementedError("Task not implemented")
@@ -131,15 +126,11 @@ class FactoryEnv(DirectRLEnv):
 
         # Used to compute target poses.
         self.fixed_success_pos_local = torch.zeros((self.num_envs, 3), device=self.device)
-        if self.cfg_task.name == "peg_insert":
-            self.fixed_success_pos_local[:, 2] = 0.0
-        elif self.cfg_task.name == "gear_mesh":
-            gear_base_offset = self._get_target_gear_base_offset()
-            self.fixed_success_pos_local[:, 0] = gear_base_offset[0]
-            self.fixed_success_pos_local[:, 2] = gear_base_offset[2]
-        elif self.cfg_task.name == "nut_thread":
+        if self.cfg_task.name == "nut_thread":
             head_height = self.cfg_task.fixed_asset_cfg.base_height
             shank_length = self.cfg_task.fixed_asset_cfg.height
+            if type(self.cfg_task.fixed_asset_cfg) != BoltM16:
+                raise TypeError(f"Expected fixed asset to be of type BoltM16 got : {type(self.cfg_task.fixed_asset_cfg)}")
             thread_pitch = self.cfg_task.fixed_asset_cfg.thread_pitch
             self.fixed_success_pos_local[:, 2] = head_height + shank_length - thread_pitch * 1.5
         else:
@@ -166,22 +157,24 @@ class FactoryEnv(DirectRLEnv):
         )
 
         self._robot = Articulation(self.cfg.robot)
-        self._fixed_asset = Articulation(self.cfg_task.fixed_asset)
-        self._held_asset = Articulation(self.cfg_task.held_asset)
-        if self.cfg_task.name == "gear_mesh":
-            self._small_gear_asset = Articulation(self.cfg_task.small_gear_cfg)
-            self._large_gear_asset = Articulation(self.cfg_task.large_gear_cfg)
 
+        if self.cfg_task.fixed_asset is None:
+            raise ValueError("fixed_asset Articulation instance was not set")
+        
+        self._fixed_asset = Articulation(self.cfg_task.fixed_asset)
+
+        if self.cfg_task.held_asset is None:
+            raise ValueError("held_asset Articulation instance was not set")
+
+        self._held_asset = Articulation(self.cfg_task.held_asset)
+        
         self.scene.clone_environments(copy_from_source=False)
         self.scene.filter_collisions()
 
         self.scene.articulations["robot"] = self._robot
         self.scene.articulations["fixed_asset"] = self._fixed_asset
         self.scene.articulations["held_asset"] = self._held_asset
-        if self.cfg_task.name == "gear_mesh":
-            self.scene.articulations["small_gear"] = self._small_gear_asset
-            self.scene.articulations["large_gear"] = self._large_gear_asset
-
+        
         # add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
@@ -189,10 +182,10 @@ class FactoryEnv(DirectRLEnv):
     def _compute_intermediate_values(self, dt):
         """Get values computed from raw tensors. This includes adding noise."""
         # TODO: A lot of these can probably only be set once?
-        self.fixed_pos = self._fixed_asset.data.root_link_pos_w - self.scene.env_origins
+        self.fixed_pos = self._fixed_asset.data.root_link_pos_w - self.scene.env_origins    ##### fixed positions #######     
         self.fixed_quat = self._fixed_asset.data.root_link_quat_w
 
-        self.held_pos = self._held_asset.data.root_link_pos_w - self.scene.env_origins
+        self.held_pos = self._held_asset.data.root_link_pos_w - self.scene.env_origins      #### held position in each environment ###
         self.held_quat = self._held_asset.data.root_link_quat_w
 
         self.fingertip_midpoint_pos = (
@@ -208,16 +201,21 @@ class FactoryEnv(DirectRLEnv):
         self.right_finger_jacobian = jacobians[:, self.right_finger_body_idx - 1, 0:6, 0:7]
         self.fingertip_midpoint_jacobian = (self.left_finger_jacobian + self.right_finger_jacobian) * 0.5
 
-        self.fingertip_midpoint_jacobian_analytical = fc.get_analytic_jacobian(self.fingertip_midpoint_quat, 
-                                                                               self.fingertip_midpoint_jacobian, 
-                                                                               self.num_envs, self.device)
+        #self.fingertip_midpoint_jacobian_analytical = fc.get_analytic_jacobian(self.fingertip_midpoint_quat, 
+        #                                                                       self.fingertip_midpoint_jacobian, 
+        #                                                                       self.num_envs, self.device)
+        
+        self.fingertip_midpoint_jacobian_analytical = self.fingertip_midpoint_jacobian
 
         self.arm_mass_matrix = self._robot.root_physx_view.get_mass_matrices()[:, 0:7, 0:7]
+
+        ################# joint position & velocity from simulation ###############################
         self.joint_pos = self._robot.data.joint_pos.clone()
         self.joint_vel = self._robot.data.joint_vel.clone()
 
-        # Finite-differencing results in more reliable velocity estimates.
-        self.ee_linvel_fd = (self.fingertip_midpoint_pos - self.prev_fingertip_pos) / dt
+        ####### Finite-differencing results in more reliable velocity estimates.###################
+
+        self.ee_linvel_fd = (self.fingertip_midpoint_pos - self.prev_fingertip_pos) / dt        ########### end effector linear velocity  
         self.prev_fingertip_pos = self.fingertip_midpoint_pos.clone()
 
         # Add state differences if velocity isn't being added.
@@ -226,11 +224,12 @@ class FactoryEnv(DirectRLEnv):
         )
         rot_diff_quat *= torch.sign(rot_diff_quat[:, 0]).unsqueeze(-1)
         rot_diff_aa = axis_angle_from_quat(rot_diff_quat)
-        self.ee_angvel_fd = rot_diff_aa / dt
-        self.prev_fingertip_quat = self.fingertip_midpoint_quat.clone()
+        self.ee_angvel_fd = rot_diff_aa / dt                                ########### end effector angular velocity   
 
-        joint_diff = self.joint_pos[:, 0:7] - self.prev_joint_pos
-        self.joint_vel_fd = joint_diff / dt
+        self.prev_fingertip_quat = self.fingertip_midpoint_quat.clone()
+        joint_diff = self.joint_pos[:, 0:7] - self.prev_joint_pos   
+        self.joint_vel_fd = joint_diff / dt                               ######### joint velocity ############   
+
         self.prev_joint_pos = self.joint_pos[:, 0:7].clone()
 
         # Keypoint tensors.
@@ -395,6 +394,7 @@ class FactoryEnv(DirectRLEnv):
         self.ctrl_target_gripper_dof_pos = 0.0
 
         self.generate_ctrl_signals()
+        
 
     def _set_gains(self, prop_gains, rot_deriv_scale=1.0):
         """Set robot gains using critical damping."""
@@ -410,7 +410,7 @@ class FactoryEnv(DirectRLEnv):
             fingertip_midpoint_quat=self.fingertip_midpoint_quat,
             ctrl_target_fingertip_midpoint_pos=self.ctrl_target_fingertip_midpoint_pos,
             ctrl_target_fingertip_midpoint_quat=self.ctrl_target_fingertip_midpoint_quat,
-            jacobian_type="analytic",
+            jacobian_type="geometric",
             rot_error_type="axis_angle",
             )
         
@@ -422,12 +422,19 @@ class FactoryEnv(DirectRLEnv):
             jacobian=self.fingertip_midpoint_jacobian_analytical, 
             device=self.device,
         )
-        
+      
         # set target for gripper joints to use physx's PD controller
         self.ctrl_target_joint_pos[:, 7:9] =  self.ctrl_target_gripper_dof_pos
         self.ctrl_target_joint_pos[:, 0:7] = self.joint_pos[:, 0:7] + delta_arm_dof_pos
 
+        #print("Current Endeffector----------",self.fingertip_midpoint_pos)
+        #print("gripper target--------",self.ctrl_target_gripper_dof_pos)
+        #print("current joint position-------",self.joint_pos)
+        #print("IK solutions----------",delta_arm_dof_pos)
+        #print("Setting the target positions----------",self.ctrl_target_joint_pos)
+        
         self._robot.set_joint_position_target(self.ctrl_target_joint_pos)
+        
 
     def _get_dones(self):
         """Update intermediate values used for rewards and observations."""
@@ -445,9 +452,7 @@ class FactoryEnv(DirectRLEnv):
         is_centered = torch.where(xy_dist < 0.0025, torch.ones_like(curr_successes), torch.zeros_like(curr_successes))
         # Height threshold to target
         fixed_cfg = self.cfg_task.fixed_asset_cfg
-        if self.cfg_task.name == "peg_insert" or self.cfg_task.name == "gear_mesh":
-            height_threshold = fixed_cfg.height * success_threshold
-        elif self.cfg_task.name == "nut_thread":
+        if self.cfg_task.name == "nut_thread" and type(fixed_cfg) == BoltM16:
             height_threshold = fixed_cfg.thread_pitch * success_threshold
         else:
             raise NotImplementedError("Task not implemented")
@@ -543,19 +548,6 @@ class FactoryEnv(DirectRLEnv):
 
         self.randomize_initial_state(env_ids)
 
-    def _get_target_gear_base_offset(self):
-        """Get offset of target gear from the gear base asset."""
-        target_gear = self.cfg_task.target_gear
-        if target_gear == "gear_large":
-            gear_base_offset = self.cfg_task.fixed_asset_cfg.large_gear_base_offset
-        elif target_gear == "gear_medium":
-            gear_base_offset = self.cfg_task.fixed_asset_cfg.medium_gear_base_offset
-        elif target_gear == "gear_small":
-            gear_base_offset = self.cfg_task.fixed_asset_cfg.small_gear_base_offset
-        else:
-            raise ValueError(f"{target_gear} not valid in this context!")
-        return gear_base_offset
-
     def _set_assets_to_default_pose(self, env_ids):
         """Move assets to default pose before randomization."""
         held_state = self._held_asset.data.default_root_state.clone()[env_ids]
@@ -611,17 +603,7 @@ class FactoryEnv(DirectRLEnv):
 
     def get_handheld_asset_relative_pose(self):
         """Get default relative pose between help asset and fingertip."""
-        if self.cfg_task.name == "peg_insert":
-            held_asset_relative_pos = torch.zeros_like(self.held_base_pos_local)
-            held_asset_relative_pos[:, 2] = self.cfg_task.held_asset_cfg.height
-            held_asset_relative_pos[:, 2] -= self.cfg_task.robot_cfg.franka_fingerpad_length
-        elif self.cfg_task.name == "gear_mesh":
-            held_asset_relative_pos = torch.zeros_like(self.held_base_pos_local)
-            gear_base_offset = self._get_target_gear_base_offset()
-            held_asset_relative_pos[:, 0] += gear_base_offset[0]
-            held_asset_relative_pos[:, 2] += gear_base_offset[2]
-            held_asset_relative_pos[:, 2] += self.cfg_task.held_asset_cfg.height / 2.0 * 1.1
-        elif self.cfg_task.name == "nut_thread":
+        if self.cfg_task.name == "nut_thread":
             held_asset_relative_pos = self.held_base_pos_local
         else:
             raise NotImplementedError("Task not implemented")
@@ -709,9 +691,7 @@ class FactoryEnv(DirectRLEnv):
         fixed_tip_pos_local = torch.zeros_like(self.fixed_pos)
         fixed_tip_pos_local[:, 2] += self.cfg_task.fixed_asset_cfg.height
         fixed_tip_pos_local[:, 2] += self.cfg_task.fixed_asset_cfg.base_height
-        if self.cfg_task.name == "gear_mesh":
-            fixed_tip_pos_local[:, 0] = self._get_target_gear_base_offset()[0]
-
+        
         _, fixed_tip_pos = torch_utils.tf_combine(
             self.fixed_quat, self.fixed_pos, self.identity_quat, fixed_tip_pos_local
         )
@@ -774,22 +754,7 @@ class FactoryEnv(DirectRLEnv):
 
         self.step_sim_no_action()
 
-        # Add flanking gears after servo (so arm doesn't move them).
-        if self.cfg_task.name == "gear_mesh" and self.cfg_task.add_flanking_gears:
-            small_gear_state = self._small_gear_asset.data.default_root_state.clone()[env_ids]
-            small_gear_state[:, 0:7] = fixed_state[:, 0:7]
-            small_gear_state[:, 7:] = 0.0  # vel
-            self._small_gear_asset.write_root_link_pose_to_sim(small_gear_state[:, 0:7], env_ids=env_ids)
-            self._small_gear_asset.write_root_com_velocity_to_sim(small_gear_state[:, 7:], env_ids=env_ids)
-            self._small_gear_asset.reset()
-
-            large_gear_state = self._large_gear_asset.data.default_root_state.clone()[env_ids]
-            large_gear_state[:, 0:7] = fixed_state[:, 0:7]
-            large_gear_state[:, 7:] = 0.0  # vel
-            self._large_gear_asset.write_root_link_pose_to_sim(large_gear_state[:, 0:7], env_ids=env_ids)
-            self._large_gear_asset.write_root_com_velocity_to_sim(large_gear_state[:, 7:], env_ids=env_ids)
-            self._large_gear_asset.reset()
-
+        
         # (3) Randomize asset-in-gripper location.
         # flip gripper z orientation
         flip_z_quat = torch.tensor([0.0, 0.0, 1.0, 0.0], device=self.device).unsqueeze(0).repeat(self.num_envs, 1)
@@ -813,9 +778,7 @@ class FactoryEnv(DirectRLEnv):
         # Add asset in hand randomization
         rand_sample = torch.rand((self.num_envs, 3), dtype=torch.float32, device=self.device)
         self.held_asset_pos_noise = 2 * (rand_sample - 0.5)  # [-1, 1]
-        if self.cfg_task.name == "gear_mesh":
-            self.held_asset_pos_noise[:, 2] = -rand_sample[:, 2]  # [-1, 0]
-
+        
         held_asset_pos_noise = torch.tensor(self.cfg_task.held_asset_pos_noise, device=self.device)
         self.held_asset_pos_noise = self.held_asset_pos_noise @ torch.diag(held_asset_pos_noise)
         translated_held_asset_quat, translated_held_asset_pos = torch_utils.tf_combine(

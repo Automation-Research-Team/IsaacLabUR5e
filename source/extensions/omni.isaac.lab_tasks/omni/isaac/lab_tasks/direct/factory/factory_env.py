@@ -593,7 +593,7 @@ class FactoryEnv(DirectRLEnv):
 
             self.ctrl_target_joint_pos[env_ids, 0:7] = self.joint_pos[env_ids, 0:7]
             # Update dof state.
-            self._robot.write_joint_state_to_sim(self.joint_pos, self.joint_vel)
+            
             self._robot.set_joint_position_target(self.ctrl_target_joint_pos)
 
             # Simulate and update tensors.

@@ -12,7 +12,7 @@ from omni.isaac.lab.sim import PhysxCfg, SimulationCfg
 from omni.isaac.lab.sim.spawners.materials.physics_materials_cfg import RigidBodyMaterialCfg
 from omni.isaac.lab.utils import configclass
 
-from .factory_tasks_cfg import ASSET_DIR, FactoryTask, GearMesh, NutThread, PegInsert
+from .factory_tasks_cfg import ASSET_DIR, FactoryTask, NutThread
 
 OBS_DIM_CFG = {
     "fingertip_pos": 3,
@@ -69,13 +69,13 @@ class CtrlCfg:
 
 @configclass
 class FactoryEnvCfg(DirectRLEnvCfg):
-    decimation = 8
-    action_space = 6
+    decimation: int = 8
+    action_space: int = 6
     # num_*: will be overwritten to correspond to obs_order, state_order.
-    observation_space = 21
-    state_space = 72
-    obs_order: list = ["fingertip_pos_rel_fixed", "fingertip_quat", "ee_linvel", "ee_angvel"]
-    state_order: list = [
+    observation_space: int = 21
+    state_space: int = 72
+    obs_order: list[str] = ["fingertip_pos_rel_fixed", "fingertip_quat", "ee_linvel", "ee_angvel"]
+    state_order: list[str] = [
         "fingertip_pos",
         "fingertip_quat",
         "ee_linvel",
@@ -88,7 +88,7 @@ class FactoryEnvCfg(DirectRLEnvCfg):
         "fixed_quat",
     ]
 
-    task_name: str = "peg_insert"  # peg_insert, gear_mesh, nut_thread
+    task_name: str = "nut_thread"  # peg_insert, gear_mesh, nut_thread
     task: FactoryTask = FactoryTask()
     obs_rand: ObsRandCfg = ObsRandCfg()
     ctrl: CtrlCfg = CtrlCfg()
@@ -158,48 +158,34 @@ class FactoryEnvCfg(DirectRLEnvCfg):
         actuators={
             "panda_arm1": ImplicitActuatorCfg(
                 joint_names_expr=["panda_joint[1-4]"],
-                stiffness=0.0,
-                damping=0.0,
-                friction=0.0,
+                stiffness= 400, #7500.0,
+                damping= 80, #173.0,
+                friction=0.1,
                 armature=0.0,
-                effort_limit=87,
-                velocity_limit=124.6,
+                effort_limit=87.0,
+                velocity_limit=2.175,
             ),
             "panda_arm2": ImplicitActuatorCfg(
                 joint_names_expr=["panda_joint[5-7]"],
-                stiffness=0.0,
-                damping=0.0,
-                friction=0.0,
+                stiffness= 400, #7500.0,
+                damping= 80, #173.0,
+                friction=0.1,
                 armature=0.0,
-                effort_limit=12,
-                velocity_limit=149.5,
+                effort_limit=12.0,
+                velocity_limit=2.61,
             ),
             "panda_hand": ImplicitActuatorCfg(
                 joint_names_expr=["panda_finger_joint[1-2]"],
-                effort_limit=40.0,
-                velocity_limit=0.04,
-                stiffness=7500.0,
-                damping=173.0,
+                effort_limit=200,
+                velocity_limit=0.2,
+                stiffness=2e3,
+                damping=1e2,
                 friction=0.1,
                 armature=0.0,
             ),
         },
+        soft_joint_pos_limit_factor=1.0
     )
-
-
-@configclass
-class FactoryTaskPegInsertCfg(FactoryEnvCfg):
-    task_name = "peg_insert"
-    task = PegInsert()
-    episode_length_s = 10.0
-
-
-@configclass
-class FactoryTaskGearMeshCfg(FactoryEnvCfg):
-    task_name = "gear_mesh"
-    task = GearMesh()
-    episode_length_s = 20.0
-
 
 @configclass
 class FactoryTaskNutThreadCfg(FactoryEnvCfg):

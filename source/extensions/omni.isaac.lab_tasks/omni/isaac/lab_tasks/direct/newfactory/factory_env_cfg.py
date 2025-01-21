@@ -105,8 +105,13 @@ class FactoryEnvCfg(DirectRLEnvCfg):
             bounce_threshold_velocity=0.2,
             friction_offset_threshold=0.01,
             friction_correlation_distance=0.00625,
-            gpu_max_rigid_contact_count=2**23,
-            gpu_max_rigid_patch_count=2**23,
+            gpu_max_rigid_contact_count=2**25,
+            gpu_max_rigid_patch_count=2**25,
+            gpu_found_lost_pairs_capacity = 2**23,
+            gpu_heap_capacity = 2**28,
+            gpu_temp_buffer_capacity = 2**28,
+            gpu_max_soft_body_contacts = 2**23,
+            gpu_max_particle_contacts= 2**21,
             gpu_max_num_partitions=1,  # Important for stable simulation.
         ),
         physics_material=RigidBodyMaterialCfg(

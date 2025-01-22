@@ -150,7 +150,7 @@ class FactoryUR5eEnvCfg(DirectRLEnvCfg):
                 "ur5e_joint3":1.792e+00,
                 "ur5e_joint4":-2.049e+00,
                 "ur5e_joint5":-1.572e+00,
-                "ur5e_joint6":6.203,
+                "ur5e_joint6": 6.203,
                 "ur5e_finger_joint1":0.013, 
                 "ur5e_finger_joint2":0.013,
             }, 

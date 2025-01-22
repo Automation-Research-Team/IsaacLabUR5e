@@ -3,6 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+from omni.isaac.lab.sensors.frame_transformer.frame_transformer_cfg import FrameTransformerCfg
 import omni.isaac.lab.sim as sim_utils
 from omni.isaac.lab.actuators.actuator_cfg import ImplicitActuatorCfg
 from omni.isaac.lab.assets import ArticulationCfg
@@ -108,9 +109,9 @@ class FactoryEnvCfg(DirectRLEnvCfg):
             gpu_max_rigid_contact_count=2**25,
             gpu_max_rigid_patch_count=2**25,
             gpu_found_lost_pairs_capacity = 2**23,
+            gpu_collision_stack_size = 5*2**26,
             gpu_heap_capacity = 2**28,
             gpu_temp_buffer_capacity = 2**28,
-            gpu_max_soft_body_contacts = 2**23,
             gpu_max_particle_contacts= 2**21,
             gpu_max_num_partitions=1,  # Important for stable simulation.
         ),
@@ -190,6 +191,11 @@ class FactoryEnvCfg(DirectRLEnvCfg):
             ),
         },
         soft_joint_pos_limit_factor=1.0
+    )
+    robot_forearm_to_base_frame_transformer: FrameTransformerCfg = FrameTransformerCfg(
+        prim_path="/World/envs/env_.*/Robot/panda_link7",
+        target_frames=[FrameTransformerCfg.FrameCfg(prim_path="/World/envs/env_.*/Robot/panda_link0")],
+        debug_vis=False,
     )
 
 @configclass

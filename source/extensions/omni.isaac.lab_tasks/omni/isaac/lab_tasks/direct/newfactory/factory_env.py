@@ -8,6 +8,9 @@ import torch
 
 import carb
 import omni.isaac.core.utils.torch as torch_utils
+from omni.isaac.core.articulations import ArticulationView
+from omni.isaac.core.articulations import ArticulationView
+from omni.isaac.core.utils.rotations import quat_to_rot_matrix
 
 import omni.isaac.lab.sim as sim_utils
 from omni.isaac.lab.assets import Articulation
@@ -20,6 +23,10 @@ from omni.isaac.lab_tasks.direct.newfactory.factory_tasks_cfg import BoltM16, Nu
 from . import factory_control as fc
 from .factory_env_cfg import OBS_DIM_CFG, STATE_DIM_CFG, FactoryEnvCfg
 
+########################### packages for framew transform ################################################
+from omni.isaac.lab.sensors import FrameTransformerCfg
+
+##########################################################################################################
 
 class FactoryEnv(DirectRLEnv):
     cfg: FactoryEnvCfg
@@ -59,7 +66,7 @@ class FactoryEnv(DirectRLEnv):
         self.rot_threshold = torch.tensor(self.cfg.ctrl.rot_action_threshold, device=self.device).repeat(
             (self.num_envs, 1)
         )
-
+        
         # Set masses and frictions.
         self._set_friction(self._held_asset, self.cfg_task.held_asset_cfg.friction)
         self._set_friction(self._fixed_asset, self.cfg_task.fixed_asset_cfg.friction)
@@ -132,12 +139,27 @@ class FactoryEnv(DirectRLEnv):
             if type(self.cfg_task.fixed_asset_cfg) != BoltM16:
                 raise TypeError(f"Expected fixed asset to be of type BoltM16 got : {type(self.cfg_task.fixed_asset_cfg)}")
             thread_pitch = self.cfg_task.fixed_asset_cfg.thread_pitch
-            self.fixed_success_pos_local[:, 2] = head_height + shank_length - thread_pitch * 1.5
+            self.fixed_success_pos_local[:, 2] = head_height + shank_length - thread_pitch * 1.5 * 4  ############ target of nut pos 
         else:
             raise NotImplementedError("Task not implemented")
+        
+        # Robot joint transforms
+
+        # get arm to base frame rotation matrices
+        base_rot_matrices = []
+        base_quats = self._robot_forearm_to_base_frame_transformer.data.target_quat_source.cpu().numpy().squeeze(-2)
+        for base_quat in base_quats:
+            base_rot_matrix = quat_to_rot_matrix(base_quat)
+            base_rot_matrices.append(base_rot_matrix)
+        self.forearm_to_base_frame_rotation_matrices = torch.from_numpy(np.stack(base_rot_matrices)).to(dtype=torch.float32, device=self.device)
 
         self.ep_succeeded = torch.zeros((self.num_envs,), dtype=torch.long, device=self.device)
         self.ep_success_times = torch.zeros((self.num_envs,), dtype=torch.long, device=self.device)
+
+        ############################ Frame transformer ##################################################
+
+
+        #################################################################################################
 
     def _get_keypoint_offsets(self, num_keypoints):
         """Get uniformly-spaced keypoints along a line of unit length, centered at 0."""
@@ -155,9 +177,13 @@ class FactoryEnv(DirectRLEnv):
         cfg.func(
             "/World/envs/env_.*/Table", cfg, translation=(0.55, 0.0, 0.0), orientation=(0.70711, 0.0, 0.0, 0.70711)
         )
-
+        
         self._robot = Articulation(self.cfg.robot)
-
+        self._robot_contact_force_tracker = ArticulationView(
+            prim_paths_expr="/World/envs/env_.*/Robot",
+            name="Robot_view",
+            reset_xform_properties=False,
+        )
         if self.cfg_task.fixed_asset is None:
             raise ValueError("fixed_asset Articulation instance was not set")
         
@@ -178,6 +204,18 @@ class FactoryEnv(DirectRLEnv):
         # add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
+
+        # add view to track contact forces
+        self._robot_contact_force_tracker = ArticulationView(
+            prim_paths_expr="/World/envs/env_.*/Robot",
+            name="Robot_view",
+            reset_xform_properties=False,
+        )
+
+        # add transformer class to scene to calculate join transforms
+        self.scene.cfg.__dict__["robot_forearm_to_base_frame_transformer"] = self.cfg.robot_forearm_to_base_frame_transformer
+        self.scene._add_entities_from_cfg() # type: ignore
+        self._robot_forearm_to_base_frame_transformer = self.scene.sensors["robot_forearm_to_base_frame_transformer"]
 
     def _compute_intermediate_values(self, dt):
         """Get values computed from raw tensors. This includes adding noise."""
@@ -257,6 +295,12 @@ class FactoryEnv(DirectRLEnv):
 
     def _get_observations(self):
         """Get actor/critic inputs using asymmetric critic."""
+        forearm_contact_forces = self._robot_contact_force_tracker.get_measured_joint_forces(clone=False)[:, 7, :3]
+        self.forearm_contact_forces_base = torch.swapaxes(torch.bmm(self.forearm_to_base_frame_rotation_matrices, forearm_contact_forces.unsqueeze(-1)), axis0=1, axis1=2).squeeze(1)
+        
+        forearm_contact_torques = self._robot_contact_force_tracker.get_measured_joint_forces(clone=False)[:, 7, 3:]
+        self.forearm_contact_torques_base = torch.swapaxes(torch.bmm(self.forearm_to_base_frame_rotation_matrices, forearm_contact_torques.unsqueeze(-1)), axis0=1, axis1=2).squeeze(1)
+
         noisy_fixed_pos = self.fixed_pos_obs_frame + self.init_fixed_pos_obs_noise
 
         prev_actions = self.actions.clone()
@@ -291,6 +335,7 @@ class FactoryEnv(DirectRLEnv):
         obs_tensors = torch.cat(obs_tensors, dim=-1)
         state_tensors = [state_dict[state_name] for state_name in self.cfg.state_order + ["prev_actions"]]
         state_tensors = torch.cat(state_tensors, dim=-1)
+
         return {"policy": obs_tensors, "critic": state_tensors}
 
     def _reset_buffers(self, env_ids):
@@ -342,6 +387,7 @@ class FactoryEnv(DirectRLEnv):
 
         self.ctrl_target_gripper_dof_pos = ctrl_target_gripper_dof_pos
         self.generate_ctrl_signals()
+               
 
     def _apply_action(self):
         """Apply actions for policy as delta targets from current position."""
@@ -649,6 +695,7 @@ class FactoryEnv(DirectRLEnv):
         """Randomize initial state and perform any episode-level randomization."""
         # Disable gravity.
         physics_sim_view = sim_utils.SimulationContext.instance().physics_sim_view
+        self._robot_contact_force_tracker.initialize(physics_sim_view)
         physics_sim_view.set_gravity(carb.Float3(0.0, 0.0, 0.0))
 
         # (1.) Randomize fixed asset pose.

@@ -58,13 +58,13 @@ class CtrlCfg:
     pos_action_threshold = [0.02, 0.02, 0.02]
     rot_action_threshold = [0.097, 0.097, 0.097]
 
-    reset_joints = [0.0, -1.57e+00, 1.38e+00, -1.35e+00, -1.57e+00, 5.60e-01]
+    reset_joints = [1.523e+00, -1.333e+00, 1.792e+00, -2.049e+00, -1.572e+00,  6.203]
     reset_task_prop_gains = [300, 300, 300, 20, 20, 20]
     reset_rot_deriv_scale = 10.0
     default_task_prop_gains = [100, 100, 100, 30, 30, 30]
 
     # Null space parameters.
-    default_dof_pos_tensor = [-1.3003, -0.4015, 1.1791, -2.1493, 0.4001, 1.9425]
+    default_dof_pos_tensor = [1.523e+00, -1.333e+00, 1.792e+00, -2.049e+00, -1.572e+00,  6.203]
     kp_null = 10.0
     kd_null = 6.3246
 
@@ -145,12 +145,12 @@ class FactoryUR5eEnvCfg(DirectRLEnvCfg):
         ),
         init_state=ArticulationCfg.InitialStateCfg(
             joint_pos={
-                "ur5e_joint1":0.0,
-                "ur5e_joint2":-1.57e+00,
-                "ur5e_joint3":1.38e+00,
-                "ur5e_joint4":-1.35e+00,
-                "ur5e_joint5":-1.57e+00,
-                "ur5e_joint6":5.60e-01,
+                "ur5e_joint1":1.523e+00,
+                "ur5e_joint2":-1.333e+00,
+                "ur5e_joint3":1.792e+00,
+                "ur5e_joint4":-2.049e+00,
+                "ur5e_joint5":-1.572e+00,
+                "ur5e_joint6": 6.203,
                 "ur5e_finger_joint1":0.013, 
                 "ur5e_finger_joint2":0.013,
             },

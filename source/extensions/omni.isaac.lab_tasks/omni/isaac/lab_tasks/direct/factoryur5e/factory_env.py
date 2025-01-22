@@ -16,6 +16,7 @@ from omni.isaac.lab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_
 from omni.isaac.lab.utils.assets import ISAAC_NUCLEUS_DIR
 from omni.isaac.lab.utils.math import axis_angle_from_quat
 from omni.isaac.lab_tasks.direct.factoryur5e.factory_tasks_cfg import BoltM16, GearBase, GearMesh, NutThread
+import omni.isaac.core.utils.rotations as rotation_utils
 
 from . import factory_control as fc
 from .factory_env_cfg import OBS_DIM_CFG, STATE_DIM_CFG, FactoryUR5eEnvCfg
@@ -98,7 +99,7 @@ class FactoryUR5eEnv(DirectRLEnv):
             held_base_x_offset = gear_base_offset[0]
             held_base_z_offset = gear_base_offset[2]
         elif self.cfg_task.name == "nut_thread":
-            held_base_z_offset = self.cfg_task.fixed_asset_cfg.base_height
+            held_base_z_offset = self.cfg_task.fixed_asset_cfg.base_height + 0.012
         else:
             raise NotImplementedError("Task not implemented")
 
@@ -337,7 +338,7 @@ class FactoryUR5eEnv(DirectRLEnv):
         self.ctrl_target_fingertip_midpoint_quat = torch_utils.quat_mul(rot_actions_quat, self.fingertip_midpoint_quat)
 
         target_euler_xyz = torch.stack(torch_utils.get_euler_xyz(self.ctrl_target_fingertip_midpoint_quat), dim=1)
-        target_euler_xyz[:, 0] = 3.14159
+        target_euler_xyz[:, 0] = 0.0
         target_euler_xyz[:, 1] = 0.0
 
         self.ctrl_target_fingertip_midpoint_quat = torch_utils.quat_from_euler_xyz(
@@ -388,7 +389,7 @@ class FactoryUR5eEnv(DirectRLEnv):
         self.ctrl_target_fingertip_midpoint_quat = torch_utils.quat_mul(rot_actions_quat, self.fingertip_midpoint_quat)
 
         target_euler_xyz = torch.stack(torch_utils.get_euler_xyz(self.ctrl_target_fingertip_midpoint_quat), dim=1)
-        target_euler_xyz[:, 0] = 3.14159  # Restrict actions to be upright.
+        target_euler_xyz[:, 0] = 0.0  # Restrict actions to be upright.
         target_euler_xyz[:, 1] = 0.0
 
         self.ctrl_target_fingertip_midpoint_quat = torch_utils.quat_from_euler_xyz(
@@ -772,7 +773,7 @@ class FactoryUR5eEnv(DirectRLEnv):
                 break
 
             self._set_ur5e_to_default_pose(
-                joints=[0.0, -1.57e+00, 1.38e+00, -1.35e+00, -1.57e+00, 5.60e-01], env_ids=bad_envs
+                joints=self.cfg.ctrl.reset_joints, env_ids=bad_envs
             )
 
             ik_attempt += 1
@@ -833,10 +834,10 @@ class FactoryUR5eEnv(DirectRLEnv):
 
         held_state = self._held_asset.data.default_root_state.clone()
         held_state[:, 0:3] = translated_held_asset_pos + self.scene.env_origins
-        held_state[:, 3:6] = translated_held_asset_quat
-        held_state[:, 6:] = 0.0
-        self._held_asset.write_root_link_pose_to_sim(held_state[:, 0:6])
-        self._held_asset.write_root_com_velocity_to_sim(held_state[:, 6:])
+        held_state[:, 3:7] = translated_held_asset_quat
+        held_state[:, 7:] = 0.0
+        self._held_asset.write_root_link_pose_to_sim(held_state[:, 0:7])
+        self._held_asset.write_root_com_velocity_to_sim(held_state[:, 7:])
         self._held_asset.reset()
 
         #  Close hand

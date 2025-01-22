@@ -33,7 +33,7 @@ class HeldAssetCfg:
 @configclass
 class RobotCfg:
     robot_usd: str = ""
-    ur5e_fingerpad_length: float = 0.017608
+    ur5e_fingerpad_length: float = 0.02
     friction: float = 0.75
 
 
@@ -373,7 +373,7 @@ class NutThread(FactoryUR5eTask):
     # Robot
     hand_init_pos: list = [0.0, 0.0, 0.015]  # Relative to fixed asset tip.
     hand_init_pos_noise: list = [0.02, 0.02, 0.01]
-    hand_init_orn: list = [3.1416, 0.0, 1.83]
+    hand_init_orn: list = [0.0, 0.0, 3.141]
     hand_init_orn_noise: list = [0.0, 0.0, 0.26]
 
     # Action
@@ -429,7 +429,7 @@ class NutThread(FactoryUR5eTask):
             usd_path=held_asset_cfg.usd_path,
             activate_contact_sensors=True,
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                disable_gravity=True,
+                disable_gravity=False,
                 max_depenetration_velocity=5.0,
                 linear_damping=0.0,
                 angular_damping=0.0,

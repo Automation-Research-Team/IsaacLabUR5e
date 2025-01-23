@@ -146,20 +146,44 @@ class FactoryEnv(DirectRLEnv):
         # Robot joint transforms
 
         # get arm to base frame rotation matrices
+        #base_rot_matrices = []
+        #base_quats = self._robot_forearm_to_base_frame_transformer.data.target_quat_source.cpu().numpy().squeeze(-2)
+        #for base_quat in base_quats:
+        #    base_rot_matrix = quat_to_rot_matrix(base_quat)           
+        #    base_rot_matrices.append(base_rot_matrix)
+        #self.forearm_to_base_frame_rotation_matrices = torch.from_numpy(np.stack(base_rot_matrices)).to(dtype=torch.float32, device=self.device)
+        
+        "Adjoint Transformation matrix have following structure [R, 0; [P]_x @ R,  R] ......, [P]_x represents the skew symmetrix matrix" 
+        ###### Force and torque component matrix for translational force ################## "R and [P]_x @ R are obtained"
+        
         base_rot_matrices = []
         base_quats = self._robot_forearm_to_base_frame_transformer.data.target_quat_source.cpu().numpy().squeeze(-2)
-        for base_quat in base_quats:
-            base_rot_matrix = quat_to_rot_matrix(base_quat)
-            base_rot_matrices.append(base_rot_matrix)
-        self.forearm_to_base_frame_rotation_matrices = torch.from_numpy(np.stack(base_rot_matrices)).to(dtype=torch.float32, device=self.device)
+        base_rot_pos_matrices = []
+        base_poses = self._robot_forearm_to_base_frame_transformer.data.target_pos_source.cpu().numpy().squeeze(-2)
+        for base_pos, base_quat in zip(base_poses,base_quats):
+            base_rot_matrix = quat_to_rot_matrix(base_quat) 
+            base_rot_pos_matrix1 = self._get_skew_symmetric_matrix(base_pos)   
+            base_rot_pos_matrix = np.matmul(base_rot_pos_matrix1, base_rot_matrix)
+            base_rot_matrices.append(base_rot_matrix)     
+            base_rot_pos_matrices.append(base_rot_pos_matrix)
+        self.forearm_to_base_frame_rotation_matrices = torch.from_numpy(np.stack(base_rot_matrices)).to(dtype=torch.float32, device=self.device)  
+        self.forearm_to_base_frame_rotation_matrices_F_T_component = torch.from_numpy(np.stack(base_rot_pos_matrices)).to(dtype=torch.float32, device=self.device)
 
         self.ep_succeeded = torch.zeros((self.num_envs,), dtype=torch.long, device=self.device)
         self.ep_success_times = torch.zeros((self.num_envs,), dtype=torch.long, device=self.device)
 
-        ############################ Frame transformer ##################################################
+        ############################ Skew -symmetric matrix #############################################
+        #################################################################################################     
+    def _get_skew_symmetric_matrix(self, vec):
+        skew_sym_mat = np.zeros((3, 3), dtype=float)
+        skew_sym_mat[0, 1] = -vec[2]
+        skew_sym_mat[0, 2] = vec[1]
+        skew_sym_mat[1, 2] = -vec[0]
+        skew_sym_mat[1, 0] = vec[2]
+        skew_sym_mat[2, 0] = -vec[1]
+        skew_sym_mat[2, 1] = vec[0]
 
-
-        #################################################################################################
+        return skew_sym_mat
 
     def _get_keypoint_offsets(self, num_keypoints):
         """Get uniformly-spaced keypoints along a line of unit length, centered at 0."""
@@ -179,11 +203,11 @@ class FactoryEnv(DirectRLEnv):
         )
         
         self._robot = Articulation(self.cfg.robot)
-        self._robot_contact_force_tracker = ArticulationView(
-            prim_paths_expr="/World/envs/env_.*/Robot",
-            name="Robot_view",
-            reset_xform_properties=False,
-        )
+        #self._robot_contact_force_tracker = ArticulationView(
+        #    prim_paths_expr="/World/envs/env_.*/Robot",
+        #    name="Robot_view",
+        #    reset_xform_properties=False,
+        #)
         if self.cfg_task.fixed_asset is None:
             raise ValueError("fixed_asset Articulation instance was not set")
         
@@ -299,8 +323,18 @@ class FactoryEnv(DirectRLEnv):
         self.forearm_contact_forces_base = torch.swapaxes(torch.bmm(self.forearm_to_base_frame_rotation_matrices, forearm_contact_forces.unsqueeze(-1)), axis0=1, axis1=2).squeeze(1)
         
         forearm_contact_torques = self._robot_contact_force_tracker.get_measured_joint_forces(clone=False)[:, 7, 3:]
-        self.forearm_contact_torques_base = torch.swapaxes(torch.bmm(self.forearm_to_base_frame_rotation_matrices, forearm_contact_torques.unsqueeze(-1)), axis0=1, axis1=2).squeeze(1)
+        
+        """""First component"""
+        self.forearm_contact_torques_base1 = torch.swapaxes(torch.bmm(self.forearm_to_base_frame_rotation_matrices_F_T_component, forearm_contact_forces.unsqueeze(-1)), axis0=1, axis1=2).squeeze(1)
 
+        """""Second component"""
+        self.forearm_contact_torques_base2 = torch.swapaxes(torch.bmm(self.forearm_to_base_frame_rotation_matrices, forearm_contact_torques.unsqueeze(-1)), axis0=1, axis1=2).squeeze(1)
+        
+        """ Resultant torque """
+        self.forearm_contact_torques_base = self.forearm_contact_torques_base1 + self.forearm_contact_torques_base2
+        
+        #print(self.forearm_contact_forces_base, self.forearm_contact_torques_base)
+        
         noisy_fixed_pos = self.fixed_pos_obs_frame + self.init_fixed_pos_obs_noise
 
         prev_actions = self.actions.clone()

@@ -16,7 +16,7 @@ Reference: https://github.com/frankaemika/franka_ros
 import omni.isaac.lab.sim as sim_utils
 from omni.isaac.lab.actuators import ImplicitActuatorCfg
 from omni.isaac.lab.assets.articulation import ArticulationCfg
-#from omni.isaac.lab.utils.assets import ISAACLAB_NUCLEUS_DIR
+from omni.isaac.lab.utils.assets import ISAACLAB_NUCLEUS_DIR
 import os
 
 ##
@@ -25,7 +25,7 @@ import os
 
 UR5E_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{os.getcwd()}/source/extensions/omni.isaac.lab_assets/omni/isaac/models/models/ur5e_rl_libre.usd",
+        usd_path=f"{os.getcwd()}/source/extensions/omni.isaac.lab_assets/omni/isaac/lab_assets/Models/ur5e_rl_libre.usd",
         activate_contact_sensors=False,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -44,8 +44,7 @@ UR5E_CFG = ArticulationCfg(
                 "ur5e_joint4":-1.35e+00,
                 "ur5e_joint5":-1.57e+00,
                 "ur5e_joint6":5.60e-01,
-                "ur5e_finger_joint1":0.013, 
-                "ur5e_finger_joint2":0.013,
+                "ur5e_finger_joint.*":0.013,
         },
     ),
     actuators={

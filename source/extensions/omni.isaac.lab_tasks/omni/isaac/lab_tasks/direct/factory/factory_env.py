@@ -21,14 +21,28 @@ from .factory_env_cfg import OBS_DIM_CFG, STATE_DIM_CFG, FactoryEnvCfg
 
 
 class FactoryEnv(DirectRLEnv):
+    # pre-physics step calls
+    #   |-- _pre_physics_step(action)
+    #   |-- _apply_action()
+    # post-physics step calls
+    #   |-- _get_dones()
+    #   |-- _get_rewards()
+    #   |-- _reset_idx(env_ids)
+    #   |-- _get_observations()
+
     cfg: FactoryEnvCfg
 
     def __init__(self, cfg: FactoryEnvCfg, render_mode: str | None = None, **kwargs):
         # Update number of obs/states
         cfg.observation_space = sum([OBS_DIM_CFG[obs] for obs in cfg.obs_order])
+        print("sum cfg*******",cfg.observation_space, cfg.obs_order)
         cfg.state_space = sum([STATE_DIM_CFG[state] for state in cfg.state_order])
+        print("sum cfg*******",cfg.state_space, cfg.state_order)
+
         cfg.observation_space += cfg.action_space
         cfg.state_space += cfg.action_space
+        print("sum cfg*******",cfg.observation_space, cfg.obs_order)
+        print("sum cfg*******",cfg.state_space, cfg.state_order)
         self.cfg_task = cfg.task
 
         super().__init__(cfg, render_mode, **kwargs)
@@ -41,6 +55,8 @@ class FactoryEnv(DirectRLEnv):
     def _set_body_inertias(self):
         """Note: this is to account for the asset_options.armature parameter in IGE."""
         inertias = self._robot.root_physx_view.get_inertias()
+        print("Interitas", inertias[0])
+
         offset = torch.zeros_like(inertias)
         offset[:, :, [0, 4, 8]] += 0.01
         new_inertias = inertias + offset
@@ -203,7 +219,7 @@ class FactoryEnv(DirectRLEnv):
         self.fingertip_midpoint_angvel = self._robot.data.body_com_ang_vel_w[:, self.fingertip_body_idx]
 
         jacobians = self._robot.root_physx_view.get_jacobians()
-
+        # print("jacobinas", jacobians[0])
         self.left_finger_jacobian = jacobians[:, self.left_finger_body_idx - 1, 0:6, 0:7]
         self.right_finger_jacobian = jacobians[:, self.right_finger_body_idx - 1, 0:6, 0:7]
         self.fingertip_midpoint_jacobian = (self.left_finger_jacobian + self.right_finger_jacobian) * 0.5

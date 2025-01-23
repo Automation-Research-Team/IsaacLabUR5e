@@ -2,24 +2,27 @@
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
+"""
+UR5e-Master environment.
+"""
 
 import gymnasium as gym
 
 from . import agents
-from .factory_env import FactoryUR5eEnv
-from .factory_env_cfg import  FactoryUR5eTaskNutThreadCfg
+from .ur5e_master_env import UR5eMasterEnv
+from .ur5e_master_env_cfg import  MasterUR5eTaskNutThreadCfg
+
 
 ##
 # Register Gym environments.
 ##
 
-
 gym.register(
-    id="Isaac-Factory-UR5e-NutThread-Direct-v0",
-    entry_point="omni.isaac.lab_tasks.direct.factoryur5e:FactoryUR5eEnv",
+    id="Isaac-UR5e-Master-Direct-v0",
+    entry_point=f"{__name__}.ur5e_master_env:UR5eMasterEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": FactoryUR5eTaskNutThreadCfg,
+        "env_cfg_entry_point": MasterUR5eTaskNutThreadCfg,
         "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_cfg.yaml",
     },
 )

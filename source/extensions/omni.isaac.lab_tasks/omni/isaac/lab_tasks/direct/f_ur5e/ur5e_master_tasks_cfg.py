@@ -38,7 +38,7 @@ class RobotCfg:
 
 
 @configclass
-class FactoryUR5eTask:
+class MasterUR5eTask:
     robot_cfg: RobotCfg = RobotCfg()
     name: str = ""
     duration_s = 5.0
@@ -103,7 +103,7 @@ class BoltM16(FixedAssetCfg):
 
 
 @configclass
-class NutThread(FactoryUR5eTask):
+class NutThread(MasterUR5eTask):
     name = "nut_thread"
     fixed_asset_cfg = BoltM16()
     held_asset_cfg = NutM16()
@@ -159,7 +159,7 @@ class NutThread(FactoryUR5eTask):
             collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.005, rest_offset=0.0),
         ),
         init_state=ArticulationCfg.InitialStateCfg(
-            pos=(0.6, 0.0, 0.05), rot=(1.0, 0.0, 0.0, 0.0), joint_pos={}, joint_vel={}
+            pos=(0.6, 0.0, 0.0), rot=(1.0, 0.0, 0.0, 0.0), joint_pos={}, joint_vel={}
         ),
         actuators={},
     )
@@ -184,7 +184,7 @@ class NutThread(FactoryUR5eTask):
             collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.005, rest_offset=0.0),
         ),
         init_state=ArticulationCfg.InitialStateCfg(
-            pos=(0.0, 0.4, 0.1), rot=(1.0, 0.0, 0.0, 0.0), joint_pos={}, joint_vel={}
+            pos=(0.6, 0.0, 0.0001), rot=(1.0, 0.0, 0.0, 0.0), joint_pos={}, joint_vel={}
         ),
         actuators={},
     )

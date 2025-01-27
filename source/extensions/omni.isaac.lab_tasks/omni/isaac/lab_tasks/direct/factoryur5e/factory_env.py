@@ -150,8 +150,14 @@ class FactoryUR5eEnv(DirectRLEnv):
         else:
             raise NotImplementedError("Task not implemented")
 
-        self.ep_succeeded = torch.zeros((self.num_envs,), dtype=torch.long, device=self.device)
-        self.ep_success_times = torch.zeros((self.num_envs,), dtype=torch.long, device=self.device)
+        # Used for tracking success rate and mean success time
+        self.ep_succeeded = torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device)
+        self.success_rate = 0.0
+        self.mean_success_time = self.max_episode_length
+        
+        self.success_rate_window = self.cfg_task.success_rate_window
+        self.num_recent_successes = 0
+        self.recent_success_times_total = 0
 
     def _get_keypoint_offsets(self, num_keypoints):
         """Get uniformly-spaced keypoints along a line of unit length, centered at 0."""
@@ -258,6 +264,7 @@ class FactoryUR5eEnv(DirectRLEnv):
             )[1]
 
         self.keypoint_dist = torch.norm(self.keypoints_held - self.keypoints_fixed, p=2, dim=-1).mean(-1)
+        self.extras["mean_keypoint_dist"] = self.keypoint_dist.mean().cpu().numpy().item()
         self.last_update_timestamp = self._robot._data._sim_timestamp
 
     def _get_observations(self):
@@ -352,7 +359,7 @@ class FactoryUR5eEnv(DirectRLEnv):
         """Apply actions for policy as delta targets from current position."""
         # Get current yaw for success checking.
         _, _, curr_yaw = torch_utils.get_euler_xyz(self.fingertip_midpoint_quat)
-        self.curr_yaw = torch.where(curr_yaw > np.deg2rad(235), curr_yaw - 2 * np.pi, curr_yaw)
+        self.curr_yaw = torch.where(curr_yaw > np.deg2rad(360), curr_yaw - 2 * np.pi, curr_yaw)
 
         # Note: We use finite-differenced velocities for control and observations.
         # Check if we need to re-compute velocities within the decimation loop.
@@ -459,36 +466,49 @@ class FactoryUR5eEnv(DirectRLEnv):
         curr_successes = torch.logical_and(is_centered, is_close_or_below)
 
         if check_rot:
-            is_rotated = self.curr_yaw < self.cfg_task.ee_success_yaw
+            is_rotated = self.curr_yaw > self.cfg_task.ee_success_yaw
             curr_successes = torch.logical_and(curr_successes, is_rotated)
 
         return curr_successes
+    
+    def _update_success_statistics(self, curr_successes: torch.Tensor) -> None:
+        """Update the success rate and mean success time across the success rate window."""
+
+        new_successes = torch.logical_and(curr_successes, torch.logical_not(self.ep_succeeded))
+        self.ep_succeeded[new_successes] = 1
+        if torch.any(new_successes):
+            num_new_successes = torch.count_nonzero(new_successes).item()
+            self.num_recent_successes += num_new_successes
+            success_rate = self.num_recent_successes / self.success_rate_window
+            self.extras["success_rate"] = success_rate
+            self.success_rate = success_rate
+
+            new_success_times = self.episode_length_buf[new_successes]
+            new_success_times_total = new_success_times.sum().item()
+            self.recent_success_times_total += new_success_times_total
+            mean_success_time = self.recent_success_times_total / self.success_rate_window
+            self.extras["mean_success_time"] = mean_success_time
+            self.mean_success_time = mean_success_time
+        else:
+            self.extras["success_rate"] = self.success_rate
+            self.extras["mean_success_time"] = self.mean_success_time
+
+        if (self.common_step_counter % self.success_rate_window) == 0:
+            self.num_recent_successes = 0
+            self.recent_success_times_total = 0
+
+        self.extras["success_rate_window"] = self.success_rate_window
 
     def _get_rewards(self):
-        """Update rewards and compute success statistics."""
+        """Update rewards and success statistics."""
         # Get successful and failed envs at current timestep
         check_rot = self.cfg_task.name == "nut_thread"
         curr_successes = self._get_curr_successes(
             success_threshold=self.cfg_task.success_threshold, check_rot=check_rot
         )
+        self._update_success_statistics(curr_successes)
 
         rew_buf = self._update_rew_buf(curr_successes)
-
-        # Only log episode success rates at the end of an episode.
-        if torch.any(self.reset_buf):
-            self.extras["successes"] = torch.count_nonzero(curr_successes) / self.num_envs
-
-        # Get the time at which an episode first succeeds.
-        first_success = torch.logical_and(curr_successes, torch.logical_not(self.ep_succeeded))
-        self.ep_succeeded[curr_successes] = 1
-
-        first_success_ids = first_success.nonzero(as_tuple=False).squeeze(-1)
-        self.ep_success_times[first_success_ids] = self.episode_length_buf[first_success_ids]
-        nonzero_success_ids = self.ep_success_times.nonzero(as_tuple=False).squeeze(-1)
-
-        if len(nonzero_success_ids) > 0:  # Only log for successful episodes.
-            success_times = self.ep_success_times[nonzero_success_ids].sum() / len(nonzero_success_ids)
-            self.extras["success_times"] = success_times
 
         self.prev_actions = self.actions.clone()
         return rew_buf
@@ -777,7 +797,7 @@ class FactoryUR5eEnv(DirectRLEnv):
             )
 
             ik_attempt += 1
-            print(f"IK Attempt: {ik_attempt}\tBad Envs: {bad_envs.shape[0]}")
+            print(f"IK Attempt: {ik_attempt}\tBadly Randomized Envs: {bad_envs.shape[0]}")
 
         self.step_sim_no_action()
 

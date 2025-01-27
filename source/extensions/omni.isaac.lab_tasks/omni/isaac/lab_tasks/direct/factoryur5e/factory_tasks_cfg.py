@@ -3,6 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+import numpy as np
 import omni.isaac.lab.sim as sim_utils
 from omni.isaac.lab.assets import ArticulationCfg
 from omni.isaac.lab.utils import configclass
@@ -84,6 +85,9 @@ class FactoryUR5eTask:
     # Fixed-asset height fraction for which different bonuses are rewarded (see individual tasks).
     success_threshold: float = 0.04
     engage_threshold: float = 0.9
+
+    # Evaluation
+    success_rate_window: int = 100 # Number of episodes over which to calculate task success rate and mean success time
 
 
 @configclass
@@ -373,7 +377,7 @@ class NutThread(FactoryUR5eTask):
     # Robot
     hand_init_pos: list = [0.0, 0.0, 0.015]  # Relative to fixed asset tip.
     hand_init_pos_noise: list = [0.02, 0.02, 0.01]
-    hand_init_orn: list = [0.0, 0.0, 3.141]
+    hand_init_orn: list = [0.0, 0.0, np.pi]
     hand_init_orn_noise: list = [0.0, 0.0, 0.26]
 
     # Action

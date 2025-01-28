@@ -233,43 +233,56 @@ class UR5eMasterEnv(DirectRLEnv):
             action.clone().to(self.device) #self.cfg.ctrl.ema_factor * action.clone().to(self.device) + (1 - self.cfg.ctrl.ema_factor) * self.actions
         )
     def _apply_action(self):
+        """Apply actions for policy as delta targets from current position."""
+        # Get current yaw for success checking.
+        _, _, curr_yaw = torch_utils.get_euler_xyz(self.fingertip_midpoint_quat)
+        self.curr_yaw = torch.where(curr_yaw > np.deg2rad(235), curr_yaw - 2 * np.pi, curr_yaw)
 
-        """Apply actions from policy as position/rotation/force/torque targets."""
+        # Note: We use finite-differenced velocities for control and observations.
+        # Check if we need to re-compute velocities within the decimation loop.
+        if self.last_update_timestamp < self._robot._data._sim_timestamp:
+            self._compute_intermediate_values(dt=self.physics_dt)
+
         # Interpret actions as target pos displacements and set pos target
-        pos_actions = self.actions[:, 0:3]
-
-        pos_actions[:, 2] = (pos_actions[:, 2] + 1.0) * 0.5  # [-1, 0]
-
-        self.ctrl_target_fingertip_midpoint_pos = (
-            self.fingertip_midpoint_pos + pos_actions
-        )
+        pos_actions = self.actions[:, 0:3] * self.pos_threshold
 
         # Interpret actions as target rot (axis-angle) displacements
         rot_actions = self.actions[:, 3:6]
         if self.cfg_task.unidirectional_rot:
-            rot_actions[:, 2] = (rot_actions[:, 2] + 1.0) * 0.5  # COUNTER CLOCK-WISE 
+            rot_actions[:, 2] = -(rot_actions[:, 2] + 1.0) * 0.5  # [-1, 0]
+        rot_actions = rot_actions * self.rot_threshold
 
-       
+        self.ctrl_target_fingertip_midpoint_pos = self.fingertip_midpoint_pos + pos_actions
+        # To speed up learning, never allow the policy to move more than 5cm away from the base.
+        delta_pos = self.ctrl_target_fingertip_midpoint_pos - self.fixed_pos_action_frame
+        pos_error_clipped = torch.clip(
+            delta_pos, -self.cfg.ctrl.pos_action_bounds[0], self.cfg.ctrl.pos_action_bounds[1]
+        )
+        self.ctrl_target_fingertip_midpoint_pos = self.fixed_pos_action_frame + pos_error_clipped
+
         # Convert to quat and set rot target
         angle = torch.norm(rot_actions, p=2, dim=-1)
         axis = rot_actions / angle.unsqueeze(-1)
+
         rot_actions_quat = torch_utils.quat_from_angle_axis(angle, axis)
         rot_actions_quat = torch.where(
             angle.unsqueeze(-1).repeat(1, 4) > 1e-6,
             rot_actions_quat,
-            torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat(
-                self.num_envs, 1
-            ),
+            torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat(self.num_envs, 1),
         )
-        self.ctrl_target_fingertip_midpoint_quat = torch_utils.quat_mul(
-            rot_actions_quat, self.fingertip_midpoint_quat
-        )
+        self.ctrl_target_fingertip_midpoint_quat = torch_utils.quat_mul(rot_actions_quat, self.fingertip_midpoint_quat)
 
+        target_euler_xyz = torch.stack(torch_utils.get_euler_xyz(self.ctrl_target_fingertip_midpoint_quat), dim=1)
+        target_euler_xyz[:, 0] = 3.14159  # Restrict actions to be upright.
+        target_euler_xyz[:, 1] = 0.0
+
+        self.ctrl_target_fingertip_midpoint_quat = torch_utils.quat_from_euler_xyz(
+            roll=target_euler_xyz[:, 0], pitch=target_euler_xyz[:, 1], yaw=target_euler_xyz[:, 2]
+        )
 
         self.ctrl_target_gripper_dof_pos = 0.0
-        self.rotation_speed = rot_actions[:,2]
-
         self.generate_ctrl_signals()
+
 
     def _set_gains(self, prop_gains, rot_deriv_scale=1.0):
         """Set robot gains using critical damping."""
@@ -384,7 +397,7 @@ class UR5eMasterEnv(DirectRLEnv):
         self._set_ur5e_to_default_pose(joints=self.cfg.ctrl.reset_joints, env_ids=env_ids)
         self.step_sim_no_action()
 
-        self.randomize_initial_state(env_ids)
+        # self.randomize_initial_state(env_ids)
 
 
     def _set_assets_to_default_pose(self, env_ids):
@@ -493,38 +506,6 @@ class UR5eMasterEnv(DirectRLEnv):
         physics_sim_view = sim_utils.SimulationContext.instance().physics_sim_view
         physics_sim_view.set_gravity(carb.Float3(0.0, 0.0, 0.0))
 
-        # (1.) Randomize fixed asset pose.
-        fixed_state = self._fixed_asset.data.default_root_state.clone()[env_ids]
-        # (1.a.) Position
-        rand_sample = torch.rand((len(env_ids), 3), dtype=torch.float32, device=self.device)
-        fixed_pos_init_rand = 2 * (rand_sample - 0.5)  # [-1, 1]
-        fixed_asset_init_pos_rand = torch.tensor(
-            self.cfg_task.fixed_asset_init_pos_noise, dtype=torch.float32, device=self.device
-        )
-        fixed_pos_init_rand = fixed_pos_init_rand @ torch.diag(fixed_asset_init_pos_rand)
-        fixed_state[:, 0:3] += fixed_pos_init_rand + self.scene.env_origins[env_ids]
-        # (1.b.) Orientation
-        fixed_orn_init_yaw = np.deg2rad(self.cfg_task.fixed_asset_init_orn_deg)
-        fixed_orn_yaw_range = np.deg2rad(self.cfg_task.fixed_asset_init_orn_range_deg)
-        rand_sample = torch.rand((len(env_ids), 3), dtype=torch.float32, device=self.device)
-        fixed_orn_euler = fixed_orn_init_yaw + fixed_orn_yaw_range * rand_sample
-        fixed_orn_euler[:, 0:2] = 0.0  # Only change yaw.
-        fixed_orn_quat = torch_utils.quat_from_euler_xyz(
-            fixed_orn_euler[:, 0], fixed_orn_euler[:, 1], fixed_orn_euler[:, 2]
-        )
-        fixed_state[:, 3:7] = fixed_orn_quat
-        # (1.c.) Velocity
-        fixed_state[:, 7:] = 0.0  # vel
-        # (1.d.) Update values.
-        self._fixed_asset.write_root_link_pose_to_sim(fixed_state[:, 0:7], env_ids=env_ids)
-        self._fixed_asset.write_root_com_velocity_to_sim(fixed_state[:, 7:], env_ids=env_ids)
-        self._fixed_asset.reset()
-
-        # (1.e.) Noisy position observation.
-        fixed_asset_pos_noise = torch.randn((len(env_ids), 3), dtype=torch.float32, device=self.device)
-        fixed_asset_pos_rand = torch.tensor(self.cfg.obs_rand.fixed_asset_pos, dtype=torch.float32, device=self.device)
-        fixed_asset_pos_noise = fixed_asset_pos_noise @ torch.diag(fixed_asset_pos_rand)
-        self.init_fixed_pos_obs_noise[:] = fixed_asset_pos_noise
 
         self.step_sim_no_action()
 
@@ -539,70 +520,6 @@ class UR5eMasterEnv(DirectRLEnv):
         )
         self.fixed_pos_obs_frame[:] = fixed_tip_pos
 
-        # (2) Move gripper to randomizes location above fixed asset. Keep trying until IK succeeds.
-        # (a) get position vector to target
-        bad_envs = env_ids.clone()
-        ik_attempt = 0
-
-        hand_down_quat = torch.zeros((self.num_envs, 4), dtype=torch.float32, device=self.device)
-        self.hand_down_euler = torch.zeros((self.num_envs, 3), dtype=torch.float32, device=self.device)
-        while True:
-            n_bad = bad_envs.shape[0]
-
-            above_fixed_pos = fixed_tip_pos.clone()
-            above_fixed_pos[:, 2] += self.cfg_task.hand_init_pos[2]
-
-            rand_sample = torch.rand((n_bad, 3), dtype=torch.float32, device=self.device)
-            above_fixed_pos_rand = 2 * (rand_sample - 0.5)  # [-1, 1]
-            hand_init_pos_rand = torch.tensor(self.cfg_task.hand_init_pos_noise, device=self.device)
-            above_fixed_pos_rand = above_fixed_pos_rand @ torch.diag(hand_init_pos_rand)
-            above_fixed_pos[bad_envs] += above_fixed_pos_rand
-
-            # (b) get random orientation facing down
-            hand_down_euler = (
-                torch.tensor(self.cfg_task.hand_init_orn, device=self.device).unsqueeze(0).repeat(n_bad, 1)
-            )
-
-            rand_sample = torch.rand((n_bad, 3), dtype=torch.float32, device=self.device)
-            above_fixed_orn_noise = 2 * (rand_sample - 0.5)  # [-1, 1]
-            hand_init_orn_rand = torch.tensor(self.cfg_task.hand_init_orn_noise, device=self.device)
-            above_fixed_orn_noise = above_fixed_orn_noise @ torch.diag(hand_init_orn_rand)
-            hand_down_euler += above_fixed_orn_noise
-            self.hand_down_euler[bad_envs, ...] = hand_down_euler
-            hand_down_quat[bad_envs, :] = torch_utils.quat_from_euler_xyz(
-                roll=hand_down_euler[:, 0], pitch=hand_down_euler[:, 1], yaw=hand_down_euler[:, 2]
-            )
-
-            # (c) iterative IK Method
-            self.ctrl_target_fingertip_midpoint_pos[bad_envs, ...] = above_fixed_pos[bad_envs, ...]
-            self.ctrl_target_fingertip_midpoint_quat[bad_envs, ...] = hand_down_quat[bad_envs, :]
-
-            pos_error, aa_error = self.set_pos_inverse_kinematics(env_ids=bad_envs)
-            pos_error = torch.linalg.norm(pos_error, dim=1) > 1e3
-            angle_error = torch.norm(aa_error, dim=1) > 1e3
-            any_error = torch.logical_or(pos_error, angle_error)
-            bad_envs = bad_envs[any_error.nonzero(as_tuple=False).squeeze(-1)]
-
-            # Check IK succeeded for all envs, otherwise try again for those envs
-            if bad_envs.shape[0] == 0:
-                break
-
-            self._set_ur5e_to_default_pose(
-                joints=[0e+00, -1.333e+00, 1.792e+00, -2.049e+00, -1.572e+00,  6.203], env_ids=bad_envs
-            )
-
-            ik_attempt += 1
-            print(f"IK Attempt: {ik_attempt}\tBad Envs: {bad_envs.shape[0]}")
-
-        self.step_sim_no_action()
-
-        #  Close hand
-        # Set gains to use for quick resets.
-        reset_task_prop_gains = torch.tensor(self.cfg.ctrl.reset_task_prop_gains, device=self.device).repeat(
-            (self.num_envs, 1)
-        )
-        reset_rot_deriv_scale = self.cfg.ctrl.reset_rot_deriv_scale
-        self._set_gains(reset_task_prop_gains, reset_rot_deriv_scale)
 
         self.step_sim_no_action()
 
@@ -613,9 +530,6 @@ class UR5eMasterEnv(DirectRLEnv):
         # Set initial actions to involve no-movement. Needed for EMA/correct penalties.
         self.actions = torch.zeros_like(self.actions)
         self.prev_actions = torch.zeros_like(self.actions)
-        # Back out what actions should be for initial state.
-        # Relative position to bolt tip.
-        self.fixed_pos_action_frame[:] = self.fixed_pos_obs_frame + self.init_fixed_pos_obs_noise
 
         pos_actions = self.fingertip_midpoint_pos - self.fixed_pos_action_frame
         pos_action_bounds = torch.tensor(self.cfg.ctrl.pos_action_bounds, device=self.device)

@@ -56,13 +56,13 @@ class CtrlCfg:
     pos_action_threshold = [0.02, 0.02, 0.02]
     rot_action_threshold = [0.097, 0.097, 0.097]
 
-    reset_joints = [1.5178e-03, -1.9651e-01, -1.4364e-03, -1.9761, -2.7717e-04, 1.7796, 7.8556e-01]
+    reset_joints = [0.0, 0.872, 0.0, -1.57e+00, 0, 2.44e+00, -1.36]
     reset_task_prop_gains = [300, 300, 300, 20, 20, 20]
     reset_rot_deriv_scale = 10.0
     default_task_prop_gains = [100, 100, 100, 30, 30, 30]
 
     # Null space parameters.
-    default_dof_pos_tensor = [-1.3003, -0.4015, 1.1791, -2.1493, 0.4001, 1.9425, 0.4754]
+    default_dof_pos_tensor = [0.0, 0.872, 0.0, -1.57e+00, 0, 2.44e+00, -1.36]
     kp_null = 10.0
     kd_null = 6.3246
 
@@ -142,16 +142,20 @@ class FactoryEnvCfg(DirectRLEnvCfg):
             collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.005, rest_offset=0.0),
         ),
         init_state=ArticulationCfg.InitialStateCfg(
+
+
             joint_pos={
-                "panda_joint1": 0.00871,
-                "panda_joint2": -0.10368,
-                "panda_joint3": -0.00794,
-                "panda_joint4": -1.49139,
-                "panda_joint5": -0.00083,
-                "panda_joint6": 1.38774,
-                "panda_joint7": 0.0,
+                "panda_joint1": -4.2535e-01,
+                "panda_joint2": 7.2075e-01,
+                "panda_joint3": 5.2488e-01,
+                "panda_joint4": -1.9573e+00,
+                "panda_joint5": -6.1233e-01,
+                "panda_joint6": 2.5194e+00,
+                "panda_joint7": 9.6307e-01,
                 "panda_finger_joint2": 0.04,
+
             },
+  
             pos=(0.0, 0.0, 0.0),
             rot=(1.0, 0.0, 0.0, 0.0),
         ),

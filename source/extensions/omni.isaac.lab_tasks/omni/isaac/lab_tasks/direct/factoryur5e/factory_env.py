@@ -730,7 +730,7 @@ class FactoryUR5eEnv(DirectRLEnv):
                 break
 
             self._set_ur5e_to_default_pose(
-                joints=[0.0, -1.57e+00, 1.38e+00, -1.35e+00, -1.57e+00, 5.60e-01], env_ids=bad_envs
+                joints=[0e+00, -1.333e+00, 1.792e+00, -2.049e+00, -1.572e+00,  6.203], env_ids=bad_envs
             )
 
             ik_attempt += 1

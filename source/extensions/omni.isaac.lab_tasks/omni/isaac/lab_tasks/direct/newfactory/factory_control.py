@@ -5,25 +5,25 @@ import omni.isaac.core.utils.torch as torch_utils
 
 from omni.isaac.lab.utils.math import axis_angle_from_quat
 
-def _apply_task_space_gains(
-    delta_fingertip_pose, fingertip_midpoint_linvel, fingertip_midpoint_angvel, task_prop_gains, task_deriv_gains
-):
-    """Interpret PD gains as task-space gains. Apply to task-space error."""
+#def _apply_task_space_gains(
+#    delta_fingertip_pose, fingertip_midpoint_linvel, fingertip_midpoint_angvel, task_prop_gains, task_deriv_gains
+#):
+#    """Interpret PD gains as task-space gains. Apply to task-space error."""
 
-    task_wrench = torch.zeros_like(delta_fingertip_pose)
+#    task_wrench = torch.zeros_like(delta_fingertip_pose)
 
     # Apply gains to lin error components
-    lin_error = delta_fingertip_pose[:, 0:3]
-    task_wrench[:, 0:3] = task_prop_gains[:, 0:3] * lin_error + task_deriv_gains[:, 0:3] * (
-        0.0 - fingertip_midpoint_linvel
-    )
+#    lin_error = delta_fingertip_pose[:, 0:3]
+#    task_wrench[:, 0:3] = task_prop_gains[:, 0:3] * lin_error + task_deriv_gains[:, 0:3] * (
+#        0.0 - fingertip_midpoint_linvel
+#    )
 
     # Apply gains to rot error components
-    rot_error = delta_fingertip_pose[:, 3:6]
-    task_wrench[:, 3:6] = task_prop_gains[:, 3:6] * rot_error + task_deriv_gains[:, 3:6] * (
-        0.0 - fingertip_midpoint_angvel
-    )
-    return task_wrench
+#    rot_error = delta_fingertip_pose[:, 3:6]
+#    task_wrench[:, 3:6] = task_prop_gains[:, 3:6] * rot_error + task_deriv_gains[:, 3:6] * (
+#        0.0 - fingertip_midpoint_angvel
+#    )
+#    return task_wrench
 
 
 def get_pose_error(

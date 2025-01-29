@@ -15,27 +15,61 @@ from omni.isaac.lab.utils import configclass
 
 from .factory_tasks_cfg import ASSET_DIR, FactoryTask, NutThread
 
+#OBS_DIM_CFG = {
+#    "fingertip_pos": 3,
+#    "fingertip_pos_rel_fixed": 3,
+#    "fingertip_quat": 4,
+#    "ee_linvel": 3,
+#    "ee_angvel": 3,
+#}
+
+#STATE_DIM_CFG = {
+#    "fingertip_pos": 3,
+#    "fingertip_pos_rel_fixed": 3,
+#    "fingertip_quat": 4,
+#    "ee_linvel": 3,
+#    "ee_angvel": 3,
+#    "joint_pos": 7,
+#    "held_pos": 3,
+#    "held_pos_rel_fixed": 3,
+#    "held_quat": 4,
+#    "fixed_pos": 3,
+#    "fixed_quat": 4,
+#    #"task_prop_gains": 6,
+#    "ema_factor": 1,
+#    "pos_threshold": 3,
+#    "rot_threshold": 3,
+#}
+
+
 OBS_DIM_CFG = {
-    "fingertip_pos": 3,
     "fingertip_pos_rel_fixed": 3,
-    "fingertip_quat": 4,
-    "ee_linvel": 3,
-    "ee_angvel": 3,
+    "Pos_error": 3,
+    "Axis_error": 3,
+    "error_ee_linvel": 3,
+    "error_ee_angvel": 3,
+    "tool_Force": 3,
+    "tool_Torque":3,
 }
 
 STATE_DIM_CFG = {
+    "Pos_error": 3,
+    "Axis_error": 3,
+    "error_ee_linvel": 3,
+    "error_ee_angvel": 3,
+    "tool_Force": 3,
+    "tool_Torque":3,
     "fingertip_pos": 3,
     "fingertip_pos_rel_fixed": 3,
     "fingertip_quat": 4,
     "ee_linvel": 3,
     "ee_angvel": 3,
-    "joint_pos": 7,
+    "joint_pos": 9,
     "held_pos": 3,
     "held_pos_rel_fixed": 3,
     "held_quat": 4,
     "fixed_pos": 3,
     "fixed_quat": 4,
-    "task_prop_gains": 6,
     "ema_factor": 1,
     "pos_threshold": 3,
     "rot_threshold": 3,
@@ -53,30 +87,51 @@ class CtrlCfg:
 
     pos_action_bounds = [0.05, 0.05, 0.05]
     rot_action_bounds = [1.0, 1.0, 1.0]
+    
+    gripper_pos_action_bounds = 0.008
 
     pos_action_threshold = [0.02, 0.02, 0.02]
     rot_action_threshold = [0.097, 0.097, 0.097]
-
-    reset_joints = [1.5178e-03, -1.9651e-01, -1.4364e-03, -1.9761, -2.7717e-04, 1.7796, 7.8556e-01]
-    reset_task_prop_gains = [300, 300, 300, 20, 20, 20]
-    reset_rot_deriv_scale = 10.0
-    default_task_prop_gains = [100, 100, 100, 30, 30, 30]
+    
+    reset_joints = [0.00871, -0.10368, -0.00794, -1.49139, -0.00083, 1.38774, 0.0]
+    #reset_task_prop_gains = [300, 300, 300, 20, 20, 20]
+    #reset_rot_deriv_scale = 10.0
+    #default_task_prop_gains = [100, 100, 100, 30, 30, 30]
 
     # Null space parameters.
-    default_dof_pos_tensor = [-1.3003, -0.4015, 1.1791, -2.1493, 0.4001, 1.9425, 0.4754]
-    kp_null = 10.0
-    kd_null = 6.3246
+    #default_dof_pos_tensor = [-1.3003, -0.4015, 1.1791, -2.1493, 0.4001, 1.9425, 0.4754]
+    #kp_null = 10.0
+    #kd_null = 6.3246
 
 
 @configclass
 class FactoryEnvCfg(DirectRLEnvCfg):
     decimation: int = 8
-    action_space: int = 6
+    action_space: int = 7
     # num_*: will be overwritten to correspond to obs_order, state_order.
-    observation_space: int = 21
-    state_space: int = 72
-    obs_order: list[str] = ["fingertip_pos_rel_fixed", "fingertip_quat", "ee_linvel", "ee_angvel"]
+    observation_space: int = 1
+    state_space: int = 7
+    #obs_order: list[str] = ["fingertip_pos_rel_fixed", "fingertip_quat", "ee_linvel", "ee_angvel"]
+    #state_order: list[str] = [
+    #    "fingertip_pos",
+    #    "fingertip_quat",
+    #    "ee_linvel",
+    #    "ee_angvel",
+    #    "joint_pos",
+    #    "held_pos",
+    #    "held_pos_rel_fixed",
+    #    "held_quat",
+    #    "fixed_pos",
+    #    "fixed_quat",
+    #]
+    obs_order: list[str] = ["fingertip_pos_rel_fixed", "Pos_error", "Axis_error", "error_ee_linvel", "error_ee_angvel", "tool_Force", "tool_Torque"] 
     state_order: list[str] = [
+        "Pos_error", 
+        "Axis_error", 
+        "error_ee_linvel", 
+        "error_ee_angvel", 
+        "tool_Force", 
+        "tool_Torque",
         "fingertip_pos",
         "fingertip_quat",
         "ee_linvel",
@@ -156,7 +211,7 @@ class FactoryEnvCfg(DirectRLEnvCfg):
                 "panda_joint5": -0.00083,
                 "panda_joint6": 1.38774,
                 "panda_joint7": 0.0,
-                "panda_finger_joint2": 0.04,
+                "panda_finger_joint2": 0.0,
             },
             pos=(0.0, 0.0, 0.0),
             rot=(1.0, 0.0, 0.0, 0.0),
@@ -164,8 +219,8 @@ class FactoryEnvCfg(DirectRLEnvCfg):
         actuators={
             "panda_arm1": ImplicitActuatorCfg(
                 joint_names_expr=["panda_joint[1-4]"],
-                stiffness= 400, #7500.0,
-                damping= 80, #173.0,
+                stiffness= 300, #400, #7500.0,
+                damping= 35 ,# 80, #173.0,
                 friction=0.1,
                 armature=0.0,
                 effort_limit=87.0,
@@ -173,8 +228,8 @@ class FactoryEnvCfg(DirectRLEnvCfg):
             ),
             "panda_arm2": ImplicitActuatorCfg(
                 joint_names_expr=["panda_joint[5-7]"],
-                stiffness= 400, #7500.0,
-                damping= 80, #173.0,
+                stiffness= 300 , #400, #7500.0,
+                damping= 35 , # 80, #173.0,
                 friction=0.1,
                 armature=0.0,
                 effort_limit=12.0,
@@ -193,7 +248,7 @@ class FactoryEnvCfg(DirectRLEnvCfg):
         soft_joint_pos_limit_factor=1.0
     )
     robot_forearm_to_base_frame_transformer: FrameTransformerCfg = FrameTransformerCfg(
-        prim_path="/World/envs/env_.*/Robot/panda_link7",
+        prim_path="/World/envs/env_.*/Robot/panda_fingertip_centered",            #panda_link7",
         target_frames=[FrameTransformerCfg.FrameCfg(prim_path="/World/envs/env_.*/Robot/panda_link0")],
         debug_vis=False,
     )

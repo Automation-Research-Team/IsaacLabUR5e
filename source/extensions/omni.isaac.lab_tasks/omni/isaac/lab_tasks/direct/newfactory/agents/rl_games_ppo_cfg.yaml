@@ -45,9 +45,9 @@ params:
   load_path: ""
 
   config:
-    name: Pos_Factory_deeper_target
+    name: Pos_Factory_deeper_target_new_reward_open_gripper
     device: cuda:0
-    full_experiment_name: PD_Controller
+    full_experiment_name: PD_Controller_new_reward_open_gripper
     env_name: rlgpu
     multi_gpu: False
     ppo: True

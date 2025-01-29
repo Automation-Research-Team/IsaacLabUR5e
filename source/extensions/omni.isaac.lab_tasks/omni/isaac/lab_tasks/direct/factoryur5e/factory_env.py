@@ -8,6 +8,8 @@ import torch
 
 import carb
 import omni.isaac.core.utils.torch as torch_utils
+from omni.isaac.core.articulations import ArticulationView
+from omni.isaac.core.utils.rotations import quat_to_rot_matrix
 
 import omni.isaac.lab.sim as sim_utils
 from omni.isaac.lab.assets import Articulation
@@ -16,7 +18,6 @@ from omni.isaac.lab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_
 from omni.isaac.lab.utils.assets import ISAAC_NUCLEUS_DIR
 from omni.isaac.lab.utils.math import axis_angle_from_quat
 from omni.isaac.lab_tasks.direct.factoryur5e.factory_tasks_cfg import BoltM16, GearBase, GearMesh, NutThread, NutUnthread
-import omni.isaac.core.utils.rotations as rotation_utils
 
 from . import factory_control as fc
 from .factory_env_cfg import OBS_DIM_CFG, STATE_DIM_CFG, FactoryUR5eEnvCfg
@@ -37,6 +38,7 @@ class FactoryUR5eEnv(DirectRLEnv):
 
         self._set_body_inertias()
         self._init_tensors()
+        self._init_contact_force_trackers()
         self._set_default_dynamics_parameters()
         self._compute_intermediate_values(dt=self.physics_dt)
 
@@ -47,6 +49,11 @@ class FactoryUR5eEnv(DirectRLEnv):
         offset[:, :, [0, 4, 8]] += 0.01
         new_inertias = inertias + offset
         self._robot.root_physx_view.set_inertias(new_inertias, torch.arange(self.num_envs))
+
+    def _init_contact_force_trackers(self):
+        """Initialize any articulation views for tracking contact forces"""
+        physics_sim_view = sim_utils.SimulationContext.instance().physics_sim_view
+        self._robot_contact_force_tracker.initialize(physics_sim_view)
 
     def _set_default_dynamics_parameters(self):
         """Set parameters defining dynamic interactions."""
@@ -170,6 +177,47 @@ class FactoryUR5eEnv(DirectRLEnv):
         self.num_recent_successes = 0
         self.recent_success_times_total = 0
 
+        # Robot joint transforms
+        self._init_robot_fingertip_to_base_transforms()
+
+    def _init_robot_fingertip_to_base_transforms(self):
+        """
+        Get fingertip to base frame transformation matrices.
+
+        Adjoint Transformation matrix have following structure [R, 0; [P]_x @ R,  R].
+
+        [P]_x represents the skew symmetrix matrix
+
+        Force and torque component matrix for translational force R and [P]_x @ R are obtained
+        """
+        base_rot_matrices = []
+        base_quats = self._robot_fingertip_to_base_frame_transformer.data.target_quat_source.cpu().numpy().squeeze(-2)
+        base_rot_pos_matrices = []
+        base_poses = self._robot_fingertip_to_base_frame_transformer.data.target_pos_source.cpu().numpy().squeeze(-2)
+        for base_pos, base_quat in zip(base_poses,base_quats):
+            base_rot_matrix = quat_to_rot_matrix(base_quat)
+            base_rot_pos_matrix1 = self._get_skew_symmetric_matrix(base_pos)
+            base_rot_pos_matrix = np.matmul(base_rot_pos_matrix1, base_rot_matrix)
+            base_rot_matrices.append(base_rot_matrix)
+            base_rot_pos_matrices.append(base_rot_pos_matrix)
+        fingertip_to_base_frame_rotation_matrices = torch.from_numpy(np.stack(base_rot_matrices)).to(dtype=torch.float32, device=self.device)
+        fingertip_to_base_frame_rotation_matrices_F_T_component = torch.from_numpy(np.stack(base_rot_pos_matrices)).to(dtype=torch.float32, device=self.device)
+        
+        self.fingertip_to_base_frame_rotation_matrices = fingertip_to_base_frame_rotation_matrices
+        self.fingertip_to_base_frame_rotation_matrices_F_T_component = fingertip_to_base_frame_rotation_matrices_F_T_component
+
+    def _get_skew_symmetric_matrix(self, pos_vec: np.ndarray) -> np.ndarray:
+        """Construct a skew symmetric matrix from the input position vector"""
+        skew_sym_mat = np.zeros((3, 3), dtype=float)
+        skew_sym_mat[0, 1] = -pos_vec[2]
+        skew_sym_mat[0, 2] = pos_vec[1]
+        skew_sym_mat[1, 2] = -pos_vec[0]
+        skew_sym_mat[1, 0] = pos_vec[2]
+        skew_sym_mat[2, 0] = -pos_vec[1]
+        skew_sym_mat[2, 1] = pos_vec[0]
+
+        return skew_sym_mat
+
     def _get_keypoint_offsets(self, num_keypoints):
         """Get uniformly-spaced keypoints along a line of unit length, centered at 0."""
         keypoint_offsets = torch.zeros((num_keypoints, 3), device=self.device)
@@ -211,6 +259,18 @@ class FactoryUR5eEnv(DirectRLEnv):
         # add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
+
+        # add view to track contact forces
+        self._robot_contact_force_tracker = ArticulationView(
+            prim_paths_expr="/World/envs/env_.*/ur5e",
+            name="ur5e_view",
+            reset_xform_properties=False,
+        )
+
+        # add transformer to scene to calculate join transforms
+        self.scene.cfg.__dict__["robot_fingertip_to_base_frame_transformer"] = self.cfg.robot_fingertip_to_base_frame_transformer
+        self.scene._add_entities_from_cfg() # type: ignore
+        self._robot_fingertip_to_base_frame_transformer = self.scene.sensors["robot_fingertip_to_base_frame_transformer"]
 
     def _compute_intermediate_values(self, dt):
         """Get values computed from raw tensors. This includes adding noise."""
@@ -277,9 +337,37 @@ class FactoryUR5eEnv(DirectRLEnv):
         self.keypoint_dist = torch.norm(self.keypoints_held - self.keypoints_fixed, p=2, dim=-1).mean(-1)
         self.extras["mean_keypoint_dist"] = self.keypoint_dist.mean().cpu().numpy().item()
         self.last_update_timestamp = self._robot._data._sim_timestamp
+        self._update_curr_base_contact_fts()
+
+    def _update_curr_base_contact_fts(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Update robot contact forces, torques and torque components in the base frame
+        """
+
+        # robot contact forces in fingertip frame
+        fingertip_contact_forces = self._robot_contact_force_tracker.get_measured_joint_forces(clone=False)[:, 7, :3]
+
+        # robot contact forces in base frame
+        self.fingertip_contact_forces_base = torch.swapaxes(torch.bmm(self.fingertip_to_base_frame_rotation_matrices, fingertip_contact_forces.unsqueeze(-1)), axis0=1, axis1=2).squeeze(1)
+        
+        # robot contact torques in fingertip frame
+        fingertip_contact_torques = self._robot_contact_force_tracker.get_measured_joint_forces(clone=False)[:, 7, 3:]
+        
+        # First component of base frame contact torques
+        self.fingertip_contact_torques_base1 = torch.swapaxes(torch.bmm(self.fingertip_to_base_frame_rotation_matrices_F_T_component, fingertip_contact_forces.unsqueeze(-1)), axis0=1, axis1=2).squeeze(1)
+
+        # Second component of base frame contact torques
+        self.fingertip_contact_torques_base2 = torch.swapaxes(torch.bmm(self.fingertip_to_base_frame_rotation_matrices, fingertip_contact_torques.unsqueeze(-1)), axis0=1, axis1=2).squeeze(1)
+        
+        # robot contact torques in base frame
+        self.fingertip_contact_torques_base = self.fingertip_contact_torques_base1 + self.fingertip_contact_torques_base2
+
+        return self.fingertip_contact_forces_base, self.fingertip_contact_torques_base1, self.fingertip_contact_torques_base2, self.fingertip_contact_torques_base
 
     def _get_observations(self):
         """Get actor/critic inputs using asymmetric critic."""
+
+        print(self.fingertip_contact_forces_base, self.fingertip_contact_torques_base)
         noisy_fixed_pos = self.fixed_pos_obs_frame + self.init_fixed_pos_obs_noise
 
         prev_actions = self.actions.clone()

@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 import os
+from omni.isaac.lab.sensors.frame_transformer.frame_transformer_cfg import FrameTransformerCfg
 import omni.isaac.lab.sim as sim_utils
 from omni.isaac.lab.actuators.actuator_cfg import ImplicitActuatorCfg
 from omni.isaac.lab.assets import ArticulationCfg
@@ -189,6 +190,11 @@ class FactoryUR5eEnvCfg(DirectRLEnvCfg):
                 armature=0.0,
             ),
         },
+    )
+    robot_fingertip_to_base_frame_transformer: FrameTransformerCfg = FrameTransformerCfg(
+        prim_path="/World/envs/env_.*/ur5e/_fingertip_centered",
+        target_frames=[FrameTransformerCfg.FrameCfg(prim_path="/World/envs/env_.*/ur5e/ur5e_link0")],
+        debug_vis=False,
     )
 
 

@@ -367,7 +367,6 @@ class FactoryUR5eEnv(DirectRLEnv):
     def _get_observations(self):
         """Get actor/critic inputs using asymmetric critic."""
 
-        print(self.fingertip_contact_forces_base, self.fingertip_contact_torques_base)
         noisy_fixed_pos = self.fixed_pos_obs_frame + self.init_fixed_pos_obs_noise
 
         prev_actions = self.actions.clone()

@@ -14,7 +14,7 @@ from omni.isaac.lab.sim.spawners.materials.physics_materials_cfg import RigidBod
 from omni.isaac.lab.utils import configclass
 from omni.isaac.lab_assets import ISAACLAB_ASSETS_DATA_DIR
 
-from .factory_tasks_cfg import FactoryUR5eTask, GearMesh, NutThread, PegInsert
+from .factory_tasks_cfg import FactoryUR5eTask, GearMesh, NutThread, NutUnthread, PegInsert
 
 OBS_DIM_CFG = {
     "fingertip_pos": 3,
@@ -42,8 +42,8 @@ STATE_DIM_CFG = {
     "rot_threshold": 3,
 }
 
-UR5E_INITIAL_JOINT_ANGLES = (1.523e+00, -1.333e+00, 1.792e+00, -2.049e+00, -1.572e+00,  6.203)
-UR5E_INITIAL_GRIPPER_POS = (0.013, 0.013)
+UR5E_INITIAL_JOINT_ANGLES = (0.0, -1.333e+00, 1.792e+00, -2.049e+00, -1.572e+00,  6.203)
+UR5E_INITIAL_GRIPPER_POS = (0.015, 0.015)
 
 @configclass
 class ObsRandCfg:
@@ -112,6 +112,7 @@ class FactoryUR5eEnvCfg(DirectRLEnvCfg):
             gpu_max_rigid_contact_count=2**23,
             gpu_max_rigid_patch_count=2**23,
             gpu_max_num_partitions=1,  # Important for stable simulation.
+            gpu_collision_stack_size=2**28
         ),
         physics_material=RigidBodyMaterialCfg(
             static_friction=1.0,
@@ -209,4 +210,10 @@ class FactoryUR5eTaskGearMeshCfg(FactoryUR5eEnvCfg):
 class FactoryUR5eTaskNutThreadCfg(FactoryUR5eEnvCfg):
     task_name = "nut_thread"
     task = NutThread()
+    episode_length_s = 30.0
+
+@configclass
+class FactoryUR5eTaskNutUnthreadCfg(FactoryUR5eEnvCfg):
+    task_name = "nut_unthread"
+    task = NutUnthread()
     episode_length_s = 30.0

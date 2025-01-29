@@ -15,7 +15,7 @@ from omni.isaac.lab.envs import DirectRLEnv
 from omni.isaac.lab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from omni.isaac.lab.utils.assets import ISAAC_NUCLEUS_DIR
 from omni.isaac.lab.utils.math import axis_angle_from_quat
-from omni.isaac.lab_tasks.direct.factoryur5e.factory_tasks_cfg import BoltM16, GearBase, GearMesh, NutThread
+from omni.isaac.lab_tasks.direct.factoryur5e.factory_tasks_cfg import BoltM16, GearBase, GearMesh, NutThread, NutUnthread
 import omni.isaac.core.utils.rotations as rotation_utils
 
 from . import factory_control as fc
@@ -100,6 +100,8 @@ class FactoryUR5eEnv(DirectRLEnv):
             held_base_z_offset = gear_base_offset[2]
         elif self.cfg_task.name == "nut_thread":
             held_base_z_offset = self.cfg_task.fixed_asset_cfg.base_height + 0.012
+        elif self.cfg_task.name == "nut_unthread" and type(self.cfg_task) == NutUnthread:
+            held_base_z_offset = self.cfg_task.fixed_asset_cfg.base_height + 0.012
         else:
             raise NotImplementedError("Task not implemented")
 
@@ -147,15 +149,24 @@ class FactoryUR5eEnv(DirectRLEnv):
                 raise TypeError(f"Expected fixed asset to be of type BoltM16 got : {type(self.cfg_task.fixed_asset_cfg)}")
             thread_pitch = self.cfg_task.fixed_asset_cfg.thread_pitch
             self.fixed_success_pos_local[:, 2] = head_height + shank_length - thread_pitch * 1.5
+        elif self.cfg_task.name == "nut_unthread" and type(self.cfg_task) == NutUnthread:
+            self.cfg_task.fixed_asset_cfg = self.cfg_task.fixed_asset_cfg
+            head_height = self.cfg_task.fixed_asset_cfg.base_height
+            shank_length = self.cfg_task.fixed_asset_cfg.height
+            if type(self.cfg_task.fixed_asset_cfg) != BoltM16:
+                raise TypeError(f"Expected fixed asset to be of type BoltM16 got : {type(self.cfg_task.fixed_asset_cfg)}")
+            thread_pitch = self.cfg_task.fixed_asset_cfg.thread_pitch
+            self.fixed_success_pos_local[:, 2] = head_height + shank_length + 0.012
         else:
             raise NotImplementedError("Task not implemented")
 
         # Used for tracking success rate and mean success time
         self.ep_succeeded = torch.zeros((self.num_envs,), dtype=torch.bool, device=self.device)
         self.success_rate = 0.0
-        self.mean_success_time = self.max_episode_length
+        self.mean_success_time = torch.inf
         
         self.success_rate_window = self.cfg_task.success_rate_window
+        self.num_recent_resets = 0
         self.num_recent_successes = 0
         self.recent_success_times_total = 0
 
@@ -372,7 +383,7 @@ class FactoryUR5eEnv(DirectRLEnv):
         # Interpret actions as target rot (axis-angle) displacements
         rot_actions = self.actions[:, 3:6]
         if self.cfg_task.unidirectional_rot:
-            rot_actions[:, 2] = -(rot_actions[:, 2] + 1.0) * 0.5  # [-1, 0]
+            rot_actions[:, 2] = (1 if self.cfg_task.name == "nut_unthread" else -1) * (rot_actions[:, 2] + 1.0) * 0.5  # [-1, 0]
         rot_actions = rot_actions * self.rot_threshold
 
         self.ctrl_target_fingertip_midpoint_pos = self.fingertip_midpoint_pos + pos_actions
@@ -458,6 +469,8 @@ class FactoryUR5eEnv(DirectRLEnv):
             height_threshold = fixed_cfg.height * success_threshold
         elif self.cfg_task.name == "nut_thread" and type(fixed_cfg) == BoltM16:
             height_threshold = fixed_cfg.thread_pitch * success_threshold
+        elif self.cfg_task.name == "nut_unthread" and type(fixed_cfg) == BoltM16:
+            height_threshold = fixed_cfg.thread_pitch * success_threshold
         else:
             raise NotImplementedError("Task not implemented")
         is_close_or_below = torch.where(
@@ -490,10 +503,11 @@ class FactoryUR5eEnv(DirectRLEnv):
             self.extras["mean_success_time"] = mean_success_time
             self.mean_success_time = mean_success_time
         else:
-            self.extras["success_rate"] = self.success_rate
-            self.extras["mean_success_time"] = self.mean_success_time
+            self.extras["success_rate"] = self.success_rate if self.num_recent_successes > 0 else 0.0
+            self.extras["mean_success_time"] = self.mean_success_time if self.recent_success_times_total > 0 else torch.inf
 
-        if (self.common_step_counter % self.success_rate_window) == 0:
+        if (self.num_recent_resets % self.success_rate_window) == 0:
+            self.num_recent_resets = 0
             self.num_recent_successes = 0
             self.recent_success_times_total = 0
 
@@ -502,7 +516,7 @@ class FactoryUR5eEnv(DirectRLEnv):
     def _get_rewards(self):
         """Update rewards and success statistics."""
         # Get successful and failed envs at current timestep
-        check_rot = self.cfg_task.name == "nut_thread"
+        check_rot = (self.cfg_task.name  == "nut_thread" or self.cfg_task.name == "nut_unthread")
         curr_successes = self._get_curr_successes(
             success_threshold=self.cfg_task.success_threshold, check_rot=check_rot
         )
@@ -558,6 +572,7 @@ class FactoryUR5eEnv(DirectRLEnv):
         We assume all envs will always be reset at the same time.
         """
         super()._reset_idx(env_ids)
+        self.num_recent_resets += torch.count_nonzero(env_ids) if isinstance(env_ids, torch.Tensor) else len(env_ids)
 
         self._set_assets_to_default_pose(env_ids)
         self._set_ur5e_to_default_pose(joints=self.cfg.ctrl.reset_joints, env_ids=env_ids)
@@ -650,11 +665,13 @@ class FactoryUR5eEnv(DirectRLEnv):
             held_asset_relative_pos[:, 2] += self.cfg_task.held_asset_cfg.height / 2.0 * 1.1
         elif self.cfg_task.name == "nut_thread":
             held_asset_relative_pos = self.held_base_pos_local
+        elif self.cfg_task.name == "nut_unthread":
+            held_asset_relative_pos = self.held_base_pos_local
         else:
             raise NotImplementedError("Task not implemented")
 
         held_asset_relative_quat = self.identity_quat
-        if self.cfg_task.name == "nut_thread":
+        if self.cfg_task.name == "nut_thread" or self.cfg_task.name == "nut_unthread":
             # Rotate along z-axis of frame for default position.
             initial_rot_deg = self.cfg_task.held_asset_rot_init
             rot_yaw_euler = torch.tensor([0.0, 0.0, initial_rot_deg * np.pi / 180.0], device=self.device).repeat(

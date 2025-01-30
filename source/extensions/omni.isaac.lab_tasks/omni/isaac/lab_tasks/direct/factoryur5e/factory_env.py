@@ -172,7 +172,7 @@ class FactoryUR5eEnv(DirectRLEnv):
         self.success_rate = 0.0
         self.mean_success_time = torch.inf
         
-        self.success_rate_window = self.cfg_task.success_rate_window
+        self.success_rate_window = self.num_envs # Number of episodes over which to calculate task success rate and mean success time
         self.num_recent_resets = 0
         self.num_recent_successes = 0
         self.recent_success_times_total = 0
@@ -339,7 +339,7 @@ class FactoryUR5eEnv(DirectRLEnv):
         self.last_update_timestamp = self._robot._data._sim_timestamp
         self._update_curr_base_contact_fts()
 
-    def _update_curr_base_contact_fts(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def _update_curr_base_contact_fts(self):
         """
         Update robot contact forces, torques and torque components in the base frame
         """
@@ -362,8 +362,6 @@ class FactoryUR5eEnv(DirectRLEnv):
         # robot contact torques in base frame
         self.fingertip_contact_torques_base = self.fingertip_contact_torques_base1 + self.fingertip_contact_torques_base2
 
-        return self.fingertip_contact_forces_base, self.fingertip_contact_torques_base1, self.fingertip_contact_torques_base2, self.fingertip_contact_torques_base
-
     def _get_observations(self):
         """Get actor/critic inputs using asymmetric critic."""
 
@@ -372,6 +370,8 @@ class FactoryUR5eEnv(DirectRLEnv):
         prev_actions = self.actions.clone()
 
         obs_dict = {
+            "fingertip_contact_forces_base": self.fingertip_contact_forces_base,
+            "fingertip_contact_torques_base": self.fingertip_contact_torques_base,
             "fingertip_pos": self.fingertip_midpoint_pos,
             "fingertip_pos_rel_fixed": self.fingertip_midpoint_pos - noisy_fixed_pos,
             "fingertip_quat": self.fingertip_midpoint_quat,
@@ -381,6 +381,8 @@ class FactoryUR5eEnv(DirectRLEnv):
         }
 
         state_dict = {
+            "fingertip_contact_forces_base": self.fingertip_contact_forces_base,
+            "fingertip_contact_torques_base": self.fingertip_contact_torques_base,
             "fingertip_pos": self.fingertip_midpoint_pos,
             "fingertip_pos_rel_fixed": self.fingertip_midpoint_pos - self.fixed_pos_obs_frame,
             "fingertip_quat": self.fingertip_midpoint_quat,
@@ -501,7 +503,10 @@ class FactoryUR5eEnv(DirectRLEnv):
             roll=target_euler_xyz[:, 0], pitch=target_euler_xyz[:, 1], yaw=target_euler_xyz[:, 2]
         )
 
-        self.ctrl_target_gripper_dof_pos = 0.0
+        if self.cfg.ctrl.using_gripper_action:
+            self.ctrl_target_gripper_dof_pos = torch.tile((self.actions[:, 6] * self.cfg.ctrl.gripper_action_bound).unsqueeze(-1), (1,2))
+        else:
+            self.ctrl_target_gripper_dof_pos = 0.0
         self.generate_ctrl_signals()
 
     def _set_gains(self, prop_gains, rot_deriv_scale=1.0):
@@ -512,29 +517,52 @@ class FactoryUR5eEnv(DirectRLEnv):
 
     def generate_ctrl_signals(self):
         """Get Jacobian. Set UR5e DOF position targets (fingers) or DOF torques (arm)."""
-        self.joint_torque, self.applied_wrench = fc.compute_dof_torque(
-            cfg=self.cfg,
-            dof_pos=self.joint_pos,
-            dof_vel=self.joint_vel,  # _fd,
-            fingertip_midpoint_pos=self.fingertip_midpoint_pos,
-            fingertip_midpoint_quat=self.fingertip_midpoint_quat,
-            fingertip_midpoint_linvel=self.ee_linvel_fd,
-            fingertip_midpoint_angvel=self.ee_angvel_fd,
-            jacobian=self.fingertip_midpoint_jacobian,
-            arm_mass_matrix=self.arm_mass_matrix,
-            ctrl_target_fingertip_midpoint_pos=self.ctrl_target_fingertip_midpoint_pos,
-            ctrl_target_fingertip_midpoint_quat=self.ctrl_target_fingertip_midpoint_quat,
-            task_prop_gains=self.task_prop_gains,
-            task_deriv_gains=self.task_deriv_gains,
-            device=self.device,
-        )
+        if self.cfg.ctrl.using_position_control:
+            pos_error, axis_angle_error = fc.get_pose_error(
+                fingertip_midpoint_pos=self.fingertip_midpoint_pos,
+                fingertip_midpoint_quat=self.fingertip_midpoint_quat,
+                ctrl_target_fingertip_midpoint_pos=self.ctrl_target_fingertip_midpoint_pos,
+                ctrl_target_fingertip_midpoint_quat=self.ctrl_target_fingertip_midpoint_quat,
+                jacobian_type="geometric",
+                rot_error_type="axis_angle",
+                )
 
-        # set target for gripper joints to use physx's PD controller
-        self.ctrl_target_joint_pos[:, 6:8] = self.ctrl_target_gripper_dof_pos
-        self.joint_torque[:, 6:8] = 0.0
+            delta_fingertip_pose = torch.cat((pos_error, axis_angle_error), dim=1)
 
-        self._robot.set_joint_position_target(self.ctrl_target_joint_pos)
-        self._robot.set_joint_effort_target(self.joint_torque)
+            delta_arm_dof_pos = fc._get_delta_dof_pos(
+                delta_pose=delta_fingertip_pose,
+                ik_method="dls",
+                jacobian=self.fingertip_midpoint_jacobian,
+                device=self.device,
+            )
+
+            self.ctrl_target_joint_pos[:, 0:6] = self.joint_pos[:, 0:6] + delta_arm_dof_pos
+            self.ctrl_target_joint_pos[:, 6:8] = self.ctrl_target_gripper_dof_pos
+            self._robot.set_joint_position_target(self.ctrl_target_joint_pos)
+        else:
+            self.joint_torque, self.applied_wrench = fc.compute_dof_torque(
+                cfg=self.cfg,
+                dof_pos=self.joint_pos,
+                dof_vel=self.joint_vel,  # _fd,
+                fingertip_midpoint_pos=self.fingertip_midpoint_pos,
+                fingertip_midpoint_quat=self.fingertip_midpoint_quat,
+                fingertip_midpoint_linvel=self.ee_linvel_fd,
+                fingertip_midpoint_angvel=self.ee_angvel_fd,
+                jacobian=self.fingertip_midpoint_jacobian,
+                arm_mass_matrix=self.arm_mass_matrix,
+                ctrl_target_fingertip_midpoint_pos=self.ctrl_target_fingertip_midpoint_pos,
+                ctrl_target_fingertip_midpoint_quat=self.ctrl_target_fingertip_midpoint_quat,
+                task_prop_gains=self.task_prop_gains,
+                task_deriv_gains=self.task_deriv_gains,
+                device=self.device,
+            )
+
+            # set target for gripper joints to use physx's PD controller
+            self.ctrl_target_joint_pos[:, 6:8] = self.ctrl_target_gripper_dof_pos
+            self.joint_torque[:, 6:8] = 0.0
+
+            self._robot.set_joint_position_target(self.ctrl_target_joint_pos)
+            self._robot.set_joint_effort_target(self.joint_torque)
 
     def _get_dones(self):
         """Update intermediate values used for rewards and observations."""

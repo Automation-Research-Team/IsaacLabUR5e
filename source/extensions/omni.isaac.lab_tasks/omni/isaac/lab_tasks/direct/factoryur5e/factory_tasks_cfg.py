@@ -86,9 +86,6 @@ class FactoryUR5eTask:
     success_threshold: float = 0.04
     engage_threshold: float = 0.9
 
-    # Evaluation
-    success_rate_window: int = 100 # Number of episodes over which to calculate task success rate and mean success time
-
 
 @configclass
 class Peg8mm(HeldAssetCfg):

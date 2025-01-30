@@ -585,6 +585,8 @@ class FactoryUR5eEnv(DirectRLEnv):
         elif self.cfg_task.name == "nut_thread" and type(fixed_cfg) == BoltM16:
             height_threshold = fixed_cfg.thread_pitch * success_threshold
         elif self.cfg_task.name == "nut_unthread" and type(fixed_cfg) == BoltM16:
+            # For unthreading, use a distance threshold
+            z_disp = torch.abs(z_disp)
             height_threshold = fixed_cfg.thread_pitch * success_threshold
         else:
             raise NotImplementedError("Task not implemented")

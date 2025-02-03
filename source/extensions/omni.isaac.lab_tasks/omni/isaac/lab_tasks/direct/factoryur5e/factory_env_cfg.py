@@ -48,7 +48,7 @@ STATE_DIM_CFG = {
 }
 
 UR5E_INITIAL_JOINT_ANGLES = (0.0, -1.333e+00, 1.792e+00, -2.049e+00, -1.572e+00,  6.203)
-UR5E_GRIPPER_BOUND = (0.015)
+UR5E_GRIPPER_BOUND = (0.013)
 UR5E_INITIAL_GRIPPER_POS = (UR5E_GRIPPER_BOUND, UR5E_GRIPPER_BOUND)
 
 @configclass
@@ -58,11 +58,11 @@ class ObsRandCfg:
 
 @configclass
 class CtrlCfg:
-    using_position_control = True
-    using_gripper_action = True
+    using_position_control = False
+    using_gripper_action = False
     ema_factor = 0.2
 
-    gripper_action_bound = UR5E_GRIPPER_BOUND
+    gripper_action_bound = 0.005
 
     pos_action_bounds = [0.05, 0.05, 0.05]
     rot_action_bounds = [1.0, 1.0, 1.0]
@@ -208,14 +208,14 @@ class FactoryUR5eEnvCfg(DirectRLEnvCfg):
                 max_linear_velocity=1000.0,
                 max_angular_velocity=3666.0,
                 enable_gyroscopic_forces=True,
-                solver_position_iteration_count=192,
-                solver_velocity_iteration_count=1,
+                solver_position_iteration_count=255,
+                solver_velocity_iteration_count=0,
                 max_contact_impulse=1e32,
             ),
             articulation_props=sim_utils.ArticulationRootPropertiesCfg(
                 enabled_self_collisions=False,
-                solver_position_iteration_count=192,
-                solver_velocity_iteration_count=1,
+                solver_position_iteration_count=255,
+                solver_velocity_iteration_count=0,
             ),
             collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.005, rest_offset=0.0),
         ),

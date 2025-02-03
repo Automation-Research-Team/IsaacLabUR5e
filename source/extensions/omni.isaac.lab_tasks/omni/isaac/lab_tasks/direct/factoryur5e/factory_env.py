@@ -108,7 +108,7 @@ class FactoryUR5eEnv(DirectRLEnv):
         elif self.cfg_task.name == "nut_thread":
             held_base_z_offset = self.cfg_task.fixed_asset_cfg.base_height + 0.012
         elif self.cfg_task.name == "nut_unthread" and type(self.cfg_task) == NutUnthread:
-            held_base_z_offset = self.cfg_task.fixed_asset_cfg.base_height + 0.012
+            held_base_z_offset = 0.5*self.cfg_task.robot_cfg.ur5e_fingerpad_length
         else:
             raise NotImplementedError("Task not implemented")
 
@@ -537,7 +537,7 @@ class FactoryUR5eEnv(DirectRLEnv):
             )
 
             self.ctrl_target_joint_pos[:, 0:6] = self.joint_pos[:, 0:6] + delta_arm_dof_pos
-            self.ctrl_target_joint_pos[:, 6:8] = self.ctrl_target_gripper_dof_pos
+            self.ctrl_target_joint_pos[:, 6:8] = self.joint_pos[:, 6:8] + self.ctrl_target_gripper_dof_pos
             self._robot.set_joint_position_target(self.ctrl_target_joint_pos)
         else:
             self.joint_torque, self.applied_wrench = fc.compute_dof_torque(
@@ -609,25 +609,25 @@ class FactoryUR5eEnv(DirectRLEnv):
         if torch.any(new_successes):
             num_new_successes = torch.count_nonzero(new_successes).item()
             self.num_recent_successes += num_new_successes
-            success_rate = self.num_recent_successes / self.success_rate_window
-            self.extras["success_rate"] = success_rate
-            self.success_rate = success_rate
 
             new_success_times = self.episode_length_buf[new_successes]
             new_success_times_total = new_success_times.sum().item()
             self.recent_success_times_total += new_success_times_total
-            mean_success_time = self.recent_success_times_total / self.success_rate_window
-            self.extras["mean_success_time"] = mean_success_time
-            self.mean_success_time = mean_success_time
-        else:
-            self.extras["success_rate"] = self.success_rate if self.num_recent_successes > 0 else 0.0
-            self.extras["mean_success_time"] = self.mean_success_time if self.recent_success_times_total > 0 else torch.inf
 
         if (self.num_recent_resets % self.success_rate_window) == 0:
+
+            success_rate = self.num_recent_successes / self.success_rate_window
+            self.success_rate = success_rate
+
+            mean_success_time = self.recent_success_times_total / self.success_rate_window
+            self.mean_success_time = mean_success_time if mean_success_time > 0 else torch.inf
+
             self.num_recent_resets = 0
             self.num_recent_successes = 0
             self.recent_success_times_total = 0
 
+        self.extras["success_rate"] = self.success_rate
+        self.extras["mean_success_time"] = self.mean_success_time
         self.extras["success_rate_window"] = self.success_rate_window
 
     def _get_rewards(self):
@@ -952,8 +952,12 @@ class FactoryUR5eEnv(DirectRLEnv):
             self._large_gear_asset.reset()
 
         # (3) Randomize asset-in-gripper location.
-        # flip gripper z orientation
-        flip_z_quat = torch.tensor([0.0, 0.0, 1.0, 0.0], device=self.device).unsqueeze(0).repeat(self.num_envs, 1)
+        # flip gripper z orientation unless we are unscrewing
+        if self.cfg_task.name == "nut_unthread":
+            flip_z_quat = [1.0, 0.0, 0.0, 0.0]
+        else:
+            flip_z_quat = [0.0, 0.0, 1.0, 0.0]
+        flip_z_quat = torch.tensor(flip_z_quat, device=self.device).unsqueeze(0).repeat(self.num_envs, 1)
         fingertip_flipped_quat, fingertip_flipped_pos = torch_utils.tf_combine(
             q1=self.fingertip_midpoint_quat,
             t1=self.fingertip_midpoint_pos,

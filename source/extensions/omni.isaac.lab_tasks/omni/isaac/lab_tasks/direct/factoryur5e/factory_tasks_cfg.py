@@ -459,7 +459,7 @@ class NutUnthread(FactoryUR5eTask):
     duration_s = 30.0
 
     # Robot
-    hand_init_pos: list = [0.0, 0.0, -(fixed_asset_cfg.height)]  # Relative to fixed asset tip. best so far 0.0005, thread pitch is 0.002
+    hand_init_pos: list = [0.0, 0.0, -(fixed_asset_cfg.height)]  # Relative to fixed asset tip.
     hand_init_pos_noise: list = [0.0, 0.0, 0.0] #[0.02, 0.02, 0.01]
     hand_init_orn: list = [0.0, 0.0, float(np.deg2rad(360))]
     hand_init_orn_noise: list = [0.0, 0.0, 0.0] #[0.0, 0.0, 0.26]
@@ -468,7 +468,7 @@ class NutUnthread(FactoryUR5eTask):
     unidirectional_rot: bool = True
 
     # Fixed Asset (applies to all tasks)
-    fixed_asset_init_pos_noise: list = [0.05, 0.05, 0.05] #[0.05, 0.05, 0.05]
+    fixed_asset_init_pos_noise: list = [0.05, 0.05, 0.05]
     fixed_asset_init_orn_deg: float = 120.0
     fixed_asset_init_orn_range_deg: float = 0.0
 

@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 import os
+from omni.isaac.lab.envs.common import ViewerCfg
 from omni.isaac.lab.sensors.frame_transformer.frame_transformer_cfg import FrameTransformerCfg
 import omni.isaac.lab.sim as sim_utils
 from omni.isaac.lab.actuators.actuator_cfg import ImplicitActuatorCfg
@@ -143,6 +144,7 @@ class CtrlCfg:
 
 @configclass
 class FactoryUR5eEnvCfg(DirectRLEnvCfg):
+    viewer: ViewerCfg = ViewerCfg(origin_type="env", env_index=0, eye=(0.8, 0.6, 0.2), lookat=(-0.3, -1.3, 0.0))
     ctrl: CtrlCfg = CtrlCfg()
 
     decimation: int = 8

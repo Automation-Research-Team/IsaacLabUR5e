@@ -14,6 +14,9 @@ a more user-friendly way.
 
 import argparse
 import sys
+import types
+
+import psutil
 
 from omni.isaac.lab.app import AppLauncher
 
@@ -65,6 +68,7 @@ import gymnasium as gym
 import os
 import random
 from datetime import datetime
+import subprocess as sp
 
 import skrl
 from packaging import version
@@ -78,8 +82,11 @@ if version.parse(skrl.__version__) < version.parse(SKRL_VERSION):
     )
     exit()
 
+using_torch = False
 if args_cli.ml_framework.startswith("torch"):
     from skrl.utils.runner.torch import Runner
+    import torch
+    using_torch = True
 elif args_cli.ml_framework.startswith("jax"):
     from skrl.utils.runner.jax import Runner
 
@@ -135,7 +142,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     print(f"[INFO] Logging experiment in directory: {log_root_path}")
     # specify directory for logging runs: {time-stamp}_{run_name}
     log_dir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + f"_{algorithm}_{args_cli.ml_framework}"
-    print(f"Exact experiment name requested from command line {log_dir}")
     if agent_cfg["agent"]["experiment"]["experiment_name"]:
         log_dir += f'_{agent_cfg["agent"]["experiment"]["experiment_name"]}'
     # set directory into agent config
@@ -175,6 +181,22 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # configure and instantiate the skrl runner
     # https://skrl.readthedocs.io/en/latest/api/utils/runner.html
     runner = Runner(env, agent_cfg)
+
+    # Add a wrapped method to the agent to record extra metrics
+    # A better long term solution might be to create agent wrapper classes which call methods on a contained instance, similar to gymnasium wrappers
+    base_record_transition = runner.agent.record_transition
+    def wrapped_record_transition(*args, **kwargs):
+        base_record_transition(*args, **kwargs)
+        runner.agent.track_data("Resource / CPU usage (%)", psutil.cpu_percent())
+        runner.agent.track_data("Resource / RAM usage (%)", psutil.virtual_memory().percent)
+        runner.agent.track_data("Resource / PyTorch GPU memory allocated (Mb)", int(sum([(torch.cuda.memory_allocated(device_id) // 1e+6) for device_id in range(torch.cuda.device_count())])))
+        runner.agent.track_data("Resource / System GPU memory allocated (Mb)", int(sum([float(gpu_mem) for gpu_mem in sp.check_output("nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits".split()).decode("ascii").split("\n")[:-1]])))
+        infos = kwargs.get("infos")
+        if infos:
+            runner.agent.track_data("Task / Success rate (%)", infos.get("success_rate"))
+            runner.agent.track_data(f"Task / {infos.get('success_rate_window')}-episode mean success time (env. steps)", infos.get("mean_success_time"))
+            runner.agent.track_data("Task / Per-env-mean keypoint distance (L2)", infos.get("mean_keypoint_dist"))
+    runner.agent.record_transition = wrapped_record_transition
 
     # run training
     runner.run()

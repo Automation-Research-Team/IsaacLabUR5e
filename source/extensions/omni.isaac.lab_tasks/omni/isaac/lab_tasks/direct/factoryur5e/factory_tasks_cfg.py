@@ -3,6 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+import numpy as np
 import omni.isaac.lab.sim as sim_utils
 from omni.isaac.lab.assets import ArticulationCfg
 from omni.isaac.lab.utils import configclass
@@ -373,7 +374,7 @@ class NutThread(FactoryUR5eTask):
     # Robot
     hand_init_pos: list = [0.0, 0.0, 0.015]  # Relative to fixed asset tip.
     hand_init_pos_noise: list = [0.02, 0.02, 0.01]
-    hand_init_orn: list = [0.0, 0.0, 3.141]
+    hand_init_orn: list = [0.0, 0.0, np.pi]
     hand_init_orn_noise: list = [0.0, 0.0, 0.26]
 
     # Action
@@ -387,6 +388,93 @@ class NutThread(FactoryUR5eTask):
     # Held Asset (applies to all tasks)
     held_asset_pos_noise: list = [0.0, 0.003, 0.003]  # noise level of the held asset in gripper
     held_asset_rot_init: float = -90.0
+
+    # Reward.
+    ee_success_yaw = 0.0
+    keypoint_coef_baseline: list = [100, 2]
+    keypoint_coef_coarse: list = [500, 2]  # 100, 2
+    keypoint_coef_fine: list = [1500, 0]  # 500, 0
+    # Fraction of thread-height.
+    success_threshold: float = 0.375
+    engage_threshold: float = 0.5
+    keypoint_scale: float = 0.05
+
+    fixed_asset: ArticulationCfg = ArticulationCfg(
+        prim_path="/World/envs/env_.*/FixedAsset",
+        spawn=sim_utils.UsdFileCfg(
+            usd_path=fixed_asset_cfg.usd_path,
+            activate_contact_sensors=True,
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                disable_gravity=False,
+                max_depenetration_velocity=5.0,
+                linear_damping=0.0,
+                angular_damping=0.0,
+                max_linear_velocity=1000.0,
+                max_angular_velocity=3666.0,
+                enable_gyroscopic_forces=True,
+                solver_position_iteration_count=192,
+                solver_velocity_iteration_count=1,
+                max_contact_impulse=1e32,
+            ),
+            mass_props=sim_utils.MassPropertiesCfg(mass=fixed_asset_cfg.mass),
+            collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.005, rest_offset=0.0),
+        ),
+        init_state=ArticulationCfg.InitialStateCfg(
+            pos=(0.6, 0.0, 0.05), rot=(1.0, 0.0, 0.0, 0.0), joint_pos={}, joint_vel={}
+        ),
+        actuators={},
+    )
+    held_asset: ArticulationCfg = ArticulationCfg(
+        prim_path="/World/envs/env_.*/HeldAsset",
+        spawn=sim_utils.UsdFileCfg(
+            usd_path=held_asset_cfg.usd_path,
+            activate_contact_sensors=True,
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                disable_gravity=False,
+                max_depenetration_velocity=5.0,
+                linear_damping=0.0,
+                angular_damping=0.0,
+                max_linear_velocity=1000.0,
+                max_angular_velocity=3666.0,
+                enable_gyroscopic_forces=True,
+                solver_position_iteration_count=192,
+                solver_velocity_iteration_count=1,
+                max_contact_impulse=1e32,
+            ),
+            mass_props=sim_utils.MassPropertiesCfg(mass=held_asset_cfg.mass),
+            collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.005, rest_offset=0.0),
+        ),
+        init_state=ArticulationCfg.InitialStateCfg(
+            pos=(0.0, 0.4, 0.1), rot=(1.0, 0.0, 0.0, 0.0), joint_pos={}, joint_vel={}
+        ),
+        actuators={},
+    )
+
+@configclass
+class NutUnthread(FactoryUR5eTask):
+    name = "nut_unthread"
+    fixed_asset_cfg = BoltM16()
+    held_asset_cfg = NutM16()
+    asset_size = 16.0
+    duration_s = 30.0
+
+    # Robot
+    hand_init_pos: list = [0.0, 0.0, -(fixed_asset_cfg.height)]  # Relative to fixed asset tip. best so far 0.0005, thread pitch is 0.002
+    hand_init_pos_noise: list = [0.0, 0.0, 0.0] #[0.02, 0.02, 0.01]
+    hand_init_orn: list = [0.0, 0.0, float(np.deg2rad(360))]
+    hand_init_orn_noise: list = [0.0, 0.0, 0.0] #[0.0, 0.0, 0.26]
+
+    # Action
+    unidirectional_rot: bool = True
+
+    # Fixed Asset (applies to all tasks)
+    fixed_asset_init_pos_noise: list = [0.05, 0.05, 0.05] #[0.05, 0.05, 0.05]
+    fixed_asset_init_orn_deg: float = 120.0
+    fixed_asset_init_orn_range_deg: float = 0.0
+
+    # Held Asset (applies to all tasks)
+    held_asset_pos_noise: list = [0.0, 0.0, 0.0] #[0.0, 0.003, 0.003]  # noise level of the held asset in gripper
+    held_asset_rot_init: float = 120.0
 
     # Reward.
     ee_success_yaw = 0.0

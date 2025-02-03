@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 import os
+from omni.isaac.lab.sensors.frame_transformer.frame_transformer_cfg import FrameTransformerCfg
 import omni.isaac.lab.sim as sim_utils
 from omni.isaac.lab.actuators.actuator_cfg import ImplicitActuatorCfg
 from omni.isaac.lab.assets import ArticulationCfg
@@ -14,9 +15,11 @@ from omni.isaac.lab.sim.spawners.materials.physics_materials_cfg import RigidBod
 from omni.isaac.lab.utils import configclass
 from omni.isaac.lab_assets import ISAACLAB_ASSETS_DATA_DIR
 
-from .factory_tasks_cfg import FactoryUR5eTask, GearMesh, NutThread, PegInsert
+from .factory_tasks_cfg import FactoryUR5eTask, GearMesh, NutThread, NutUnthread, PegInsert
 
 OBS_DIM_CFG = {
+    "fingertip_contact_forces_base":3,
+    "fingertip_contact_torques_base":3,
     "fingertip_pos": 3,
     "fingertip_pos_rel_fixed": 3,
     "fingertip_quat": 4,
@@ -25,6 +28,8 @@ OBS_DIM_CFG = {
 }
 
 STATE_DIM_CFG = {
+    "fingertip_contact_forces_base":3,
+    "fingertip_contact_torques_base":3,
     "fingertip_pos": 3,
     "fingertip_pos_rel_fixed": 3,
     "fingertip_quat": 4,
@@ -42,6 +47,9 @@ STATE_DIM_CFG = {
     "rot_threshold": 3,
 }
 
+UR5E_INITIAL_JOINT_ANGLES = (0.0, -1.333e+00, 1.792e+00, -2.049e+00, -1.572e+00,  6.203)
+UR5E_GRIPPER_BOUND = (0.015)
+UR5E_INITIAL_GRIPPER_POS = (UR5E_GRIPPER_BOUND, UR5E_GRIPPER_BOUND)
 
 @configclass
 class ObsRandCfg:
@@ -50,7 +58,11 @@ class ObsRandCfg:
 
 @configclass
 class CtrlCfg:
+    using_position_control = True
+    using_gripper_action = True
     ema_factor = 0.2
+
+    gripper_action_bound = UR5E_GRIPPER_BOUND
 
     pos_action_bounds = [0.05, 0.05, 0.05]
     rot_action_bounds = [1.0, 1.0, 1.0]
@@ -58,26 +70,90 @@ class CtrlCfg:
     pos_action_threshold = [0.02, 0.02, 0.02]
     rot_action_threshold = [0.097, 0.097, 0.097]
 
-    reset_joints = [1.523e+00, -1.333e+00, 1.792e+00, -2.049e+00, -1.572e+00,  6.203]
+    reset_joints = UR5E_INITIAL_JOINT_ANGLES
     reset_task_prop_gains = [300, 300, 300, 20, 20, 20]
     reset_rot_deriv_scale = 10.0
     default_task_prop_gains = [100, 100, 100, 30, 30, 30]
 
     # Null space parameters.
-    default_dof_pos_tensor = [1.523e+00, -1.333e+00, 1.792e+00, -2.049e+00, -1.572e+00,  6.203]
+    default_dof_pos_tensor = UR5E_INITIAL_JOINT_ANGLES
     kp_null = 10.0
     kd_null = 6.3246
+
+    torque_control_actuators = {
+            "ur5e": ImplicitActuatorCfg(
+                joint_names_expr=["ur5e_joint[1-3]"],
+                stiffness=0.0,
+                damping=0.0,
+                friction=0.0,
+                armature=0.0,
+                effort_limit=87,
+                velocity_limit=124.6,
+            ),
+            "ur5e_forearm": ImplicitActuatorCfg(
+                joint_names_expr=["ur5e_joint[4-6]"],
+                stiffness=0.0,
+                damping=0.0,
+                friction=0.0,
+                armature=0.0,
+                effort_limit=12,
+                velocity_limit=149.5,
+            ),
+            "ur5e_hand": ImplicitActuatorCfg(
+                joint_names_expr=["ur5e_finger_joint.*"],
+                effort_limit=40.0,
+                velocity_limit=0.04,
+                stiffness=7500.0,
+                damping=173.0,
+                friction=0.1,
+                armature=0.0,
+            ),
+    }
+
+    position_control_actuators = {
+            "ur5e": ImplicitActuatorCfg(
+                joint_names_expr=["ur5e_joint[1-3]"],
+                stiffness=800,
+                damping=40,
+                friction=0.0,
+                armature=0.0,
+                effort_limit=87,
+                velocity_limit=100,
+            ),
+            "ur5e_forearm": ImplicitActuatorCfg(
+                joint_names_expr=["ur5e_joint[4-6]"],
+                stiffness=800,
+                damping=40,
+                friction=0.0,
+                armature=0.0,
+                effort_limit=87,
+                velocity_limit=100,
+            ),
+            "ur5e_hand": ImplicitActuatorCfg(
+                joint_names_expr=["ur5e_finger_joint.*"],
+                effort_limit=40.0,
+                velocity_limit=0.04,
+                stiffness=7500.0,
+                damping=173.0,
+                friction=0.1,
+                armature=0.0,
+            ),
+    }
 
 
 @configclass
 class FactoryUR5eEnvCfg(DirectRLEnvCfg):
+    ctrl: CtrlCfg = CtrlCfg()
+
     decimation: int = 8
-    action_space: int = 6
+    action_space: int = 7 if ctrl.using_gripper_action else 6
     # num_*: will be overwritten to correspond to obs_order, state_order.
     observation_space: int = 21
     state_space: int = 72
-    obs_order: list[str] = ["fingertip_pos_rel_fixed", "fingertip_quat", "ee_linvel", "ee_angvel"]
+    obs_order: list[str] = ["fingertip_contact_forces_base", "fingertip_contact_torques_base", "fingertip_pos_rel_fixed", "fingertip_quat", "ee_linvel", "ee_angvel"]
     state_order: list[str] = [
+        "fingertip_contact_forces_base",
+        "fingertip_contact_torques_base",
         "fingertip_pos",
         "fingertip_quat",
         "ee_linvel",
@@ -93,7 +169,6 @@ class FactoryUR5eEnvCfg(DirectRLEnvCfg):
     task_name: str = "peg_insert"  # peg_insert, gear_mesh, nut_thread
     task: FactoryUR5eTask = FactoryUR5eTask()
     obs_rand: ObsRandCfg = ObsRandCfg()
-    ctrl: CtrlCfg = CtrlCfg()
 
     episode_length_s = 10.0  # Probably need to override.
     sim: SimulationCfg = SimulationCfg(
@@ -113,6 +188,7 @@ class FactoryUR5eEnvCfg(DirectRLEnvCfg):
             gpu_heap_capacity = 2**29,
             gpu_temp_buffer_capacity= 2**27,
             gpu_max_num_partitions=1,  # Important for stable simulation.
+            gpu_collision_stack_size=2**28
         ),
         physics_material=RigidBodyMaterialCfg(
             static_friction=1.0,
@@ -148,47 +224,24 @@ class FactoryUR5eEnvCfg(DirectRLEnvCfg):
         ),
         init_state=ArticulationCfg.InitialStateCfg(
             joint_pos={
-                "ur5e_joint1":1.523e+00,
-                "ur5e_joint2":-1.333e+00,
-                "ur5e_joint3":1.792e+00,
-                "ur5e_joint4":-2.049e+00,
-                "ur5e_joint5":-1.572e+00,
-                "ur5e_joint6": 6.203,
-                "ur5e_finger_joint1":0.013, 
-                "ur5e_finger_joint2":0.013,
-            }, 
+                "ur5e_joint1":UR5E_INITIAL_JOINT_ANGLES[0],
+                "ur5e_joint2":UR5E_INITIAL_JOINT_ANGLES[1],
+                "ur5e_joint3":UR5E_INITIAL_JOINT_ANGLES[2],
+                "ur5e_joint4":UR5E_INITIAL_JOINT_ANGLES[3],
+                "ur5e_joint5":UR5E_INITIAL_JOINT_ANGLES[4],
+                "ur5e_joint6":UR5E_INITIAL_JOINT_ANGLES[5],
+                "ur5e_finger_joint1":UR5E_INITIAL_GRIPPER_POS[0], 
+                "ur5e_finger_joint2":UR5E_INITIAL_GRIPPER_POS[1],
+            },
             pos=(0.0, 0.0, 0.0),
             rot=(1.0, 0.0, 0.0, 0.0),
         ),
-        actuators={
-            "ur5e": ImplicitActuatorCfg(
-                joint_names_expr=["ur5e_joint[1-3]"],
-                stiffness=0.0,
-                damping=0.0,
-                friction=0.0,
-                armature=0.0,
-                effort_limit=87,
-                velocity_limit=124.6,
-            ),
-            "ur5e_forearm": ImplicitActuatorCfg(
-                joint_names_expr=["ur5e_joint[4-6]"],
-                stiffness=0.0,
-                damping=0.0,
-                friction=0.0,
-                armature=0.0,
-                effort_limit=12,
-                velocity_limit=149.5,
-            ),
-            "ur5e_hand": ImplicitActuatorCfg(
-                joint_names_expr=["ur5e_finger_joint.*"],
-                effort_limit=40.0,
-                velocity_limit=0.04,
-                stiffness=7500.0,
-                damping=173.0,
-                friction=0.1,
-                armature=0.0,
-            ),
-        },
+        actuators=ctrl.position_control_actuators if ctrl.using_position_control else ctrl.torque_control_actuators # type: ignore
+    )
+    robot_fingertip_to_base_frame_transformer: FrameTransformerCfg = FrameTransformerCfg(
+        prim_path="/World/envs/env_.*/ur5e/_fingertip_centered",
+        target_frames=[FrameTransformerCfg.FrameCfg(prim_path="/World/envs/env_.*/ur5e/ur5e_link0")],
+        debug_vis=False,
     )
 
 
@@ -210,4 +263,10 @@ class FactoryUR5eTaskGearMeshCfg(FactoryUR5eEnvCfg):
 class FactoryUR5eTaskNutThreadCfg(FactoryUR5eEnvCfg):
     task_name = "nut_thread"
     task = NutThread()
+    episode_length_s = 30.0
+
+@configclass
+class FactoryUR5eTaskNutUnthreadCfg(FactoryUR5eEnvCfg):
+    task_name = "nut_unthread"
+    task = NutUnthread()
     episode_length_s = 30.0

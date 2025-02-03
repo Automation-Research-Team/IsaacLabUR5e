@@ -234,6 +234,23 @@ class FactoryEnv(DirectRLEnv):
             self.fixed_quat, self.fixed_pos, self.identity_quat, self.fixed_success_pos_local
         )
 
+        #print("Fixed pose", self.fixed_pos)
+        #print("Fixed quat", self.fixed_quat)
+
+        #print("Fixed_success_pos_local", self.fixed_success_pos_local)
+        #print("target pos ",self.target_held_base_pos)
+
+        #print("Held pose", self.held_pos)
+        #print("Held quat", self.held_quat)
+        #print("held_base_pos_local", self.held_base_pos_local)
+        #print("held_base_quat_local", self.held_base_quat_local)
+        #print("held_base_pos", self.held_base_pos)
+
+        #print(" Mid point Finger pos ", self.fingertip_midpoint_pos)
+        #print(" Mid point Finger quat ", self.fingertip_midpoint_quat)
+
+        #raise KeyboardInterrupt
+
         # Compute pos of keypoints on held asset, and fixed asset in world frame
         for idx, keypoint_offset in enumerate(self.keypoint_offsets):
             self.keypoints_held[:, idx] = torch_utils.tf_combine(
@@ -550,13 +567,16 @@ class FactoryEnv(DirectRLEnv):
     def _set_assets_to_default_pose(self, env_ids):
         """Move assets to default pose before randomization."""
         held_state = self._held_asset.data.default_root_state.clone()[env_ids]
+        
         held_state[:, 0:3] += self.scene.env_origins[env_ids]
         held_state[:, 7:] = 0.0
+
         self._held_asset.write_root_pose_to_sim(held_state[:, 0:7], env_ids=env_ids)
         self._held_asset.write_root_velocity_to_sim(held_state[:, 7:], env_ids=env_ids)
         self._held_asset.reset()
 
         fixed_state = self._fixed_asset.data.default_root_state.clone()[env_ids]
+        
         fixed_state[:, 0:3] += self.scene.env_origins[env_ids]
         fixed_state[:, 7:] = 0.0
         self._fixed_asset.write_root_pose_to_sim(fixed_state[:, 0:7], env_ids=env_ids)
@@ -662,6 +682,7 @@ class FactoryEnv(DirectRLEnv):
 
         # (1.) Randomize fixed asset pose.
         fixed_state = self._fixed_asset.data.default_root_state.clone()[env_ids]
+                
         # (1.a.) Position
         rand_sample = torch.rand((len(env_ids), 3), dtype=torch.float32, device=self.device)
         fixed_pos_init_rand = 2 * (rand_sample - 0.5)  # [-1, 1]
@@ -682,6 +703,7 @@ class FactoryEnv(DirectRLEnv):
         fixed_state[:, 3:7] = fixed_orn_quat
         # (1.c.) Velocity
         fixed_state[:, 7:] = 0.0  # vel
+        
         # (1.d.) Update values.
         self._fixed_asset.write_root_pose_to_sim(fixed_state[:, 0:7], env_ids=env_ids)
         self._fixed_asset.write_root_velocity_to_sim(fixed_state[:, 7:], env_ids=env_ids)
@@ -795,7 +817,7 @@ class FactoryEnv(DirectRLEnv):
         held_asset_relative_pos, held_asset_relative_quat = self.get_handheld_asset_relative_pose()
         asset_in_hand_quat, asset_in_hand_pos = torch_utils.tf_inverse(
             held_asset_relative_quat, held_asset_relative_pos
-        )
+        )                               ############## tf_ inverse = quat_conjugate(q), -quat_apply(q_inv, t)
 
         translated_held_asset_quat, translated_held_asset_pos = torch_utils.tf_combine(
             q1=fingertip_flipped_quat, t1=fingertip_flipped_pos, q2=asset_in_hand_quat, t2=asset_in_hand_pos

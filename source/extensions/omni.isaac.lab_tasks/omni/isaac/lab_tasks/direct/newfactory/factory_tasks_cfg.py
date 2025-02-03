@@ -124,11 +124,11 @@ class NutThread(FactoryTask):
     # Fixed Asset (applies to all tasks)
     fixed_asset_init_pos_noise: list = [0.05, 0.05, 0.05]
     fixed_asset_init_orn_deg: float = 120.0
-    fixed_asset_init_orn_range_deg: float = 30.0
+    fixed_asset_init_orn_range_deg: float = 0
 
     # Held Asset (applies to all tasks)
     held_asset_pos_noise: list = [0.0, 0.003, 0.003]  # noise level of the held asset in gripper
-    held_asset_rot_init: float = -90.0
+    held_asset_rot_init: float = -90
 
     # Reward.
     ee_success_yaw = 0.0

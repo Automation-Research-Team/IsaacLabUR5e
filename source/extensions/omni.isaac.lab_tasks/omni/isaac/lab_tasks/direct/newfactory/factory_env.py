@@ -86,6 +86,9 @@ class FactoryEnv(DirectRLEnv):
         self.identity_quat = (
             torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).unsqueeze(0).repeat(self.num_envs, 1)
         )
+        self.identity_quat_flip = (
+            torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).unsqueeze(0).repeat(self.num_envs, 1)
+        )
 
         # Control targets.
         self.ctrl_target_joint_pos = torch.zeros((self.num_envs, self._robot.num_joints), device=self.device)
@@ -110,7 +113,7 @@ class FactoryEnv(DirectRLEnv):
         self.held_base_quat_local = self.identity_quat.clone().detach()
 
         self.fingertip_base_pos_local = torch.tensor([0.0, 0.0, 0.0], device=self.device).repeat((self.num_envs, 1))
-        self.fingertip_base_quat_local = self.identity_quat.clone().detach()
+        self.fingertip_base_quat_local = self.identity_quat_flip.clone().detach()
 
         self.held_base_pos = torch.zeros_like(self.held_base_pos_local)
         self.held_base_quat = self.identity_quat.clone().detach()
@@ -138,6 +141,8 @@ class FactoryEnv(DirectRLEnv):
         self.keypoints_held = torch.zeros((self.num_envs, self.cfg_task.num_keypoints, 3), device=self.device)            # Nut
         self.keypoints_fixed = torch.zeros_like(self.keypoints_held, device=self.device)   
         self.keypoints_finger_centered = torch.zeros_like(self.keypoints_held, device=self.device) 
+        self.keypoints_finger_centered1 = torch.zeros_like(self.keypoints_held, device=self.device) 
+        self.keypoints_held1 = torch.zeros_like(self.keypoints_held, device=self.device)
 
         # Used to compute target poses.
         self.fixed_success_pos_local = torch.zeros((self.num_envs, 3), device=self.device)
@@ -311,20 +316,24 @@ class FactoryEnv(DirectRLEnv):
         self.fingertip_base_quat[:], self.fingertip_base_pos[:] = torch_utils.tf_combine(
             self.fingertip_midpoint_quat, self.fingertip_midpoint_pos, self.fingertip_base_quat_local, self.fingertip_base_pos_local
         )
-        ########################### compute fingertip midpoint ###
+        ########################### compute target ###
         self.target_held_base_quat[:], self.target_held_base_pos[:] = torch_utils.tf_combine(
             self.fixed_quat, self.fixed_pos, self.identity_quat, self.fixed_success_pos_local
         )
 
+        #print(self.target_held_base_pos)
+        #raise KeyboardInterrupt
+                      
         # Compute pos of keypoints on held asset, and fixed asset in world frame
-        for idx, keypoint_offset in enumerate(self.keypoint_offsets):
+        for idx, keypoint_offset in enumerate(self.keypoint_offsets): 
             self.keypoints_held[:, idx] = torch_utils.tf_combine(
                 self.held_base_quat, self.held_base_pos, self.identity_quat, keypoint_offset.repeat(self.num_envs, 1)
             )[1] 
             ########################### compute fingertip midpoint #################################################
             self.keypoints_finger_centered[:, idx] = torch_utils.tf_combine(
                 self.fingertip_base_quat, self.fingertip_base_pos, self.identity_quat, keypoint_offset.repeat(self.num_envs, 1)
-            )[1]
+            )[1] 
+             
             ########################### computed fingertip midpoint #################################################
             self.keypoints_fixed[:, idx] = torch_utils.tf_combine(
                 self.target_held_base_quat,
@@ -333,8 +342,38 @@ class FactoryEnv(DirectRLEnv):
                 keypoint_offset.repeat(self.num_envs, 1),
             )[1]
 
-        self.keypoint_dist_target_nut = torch.norm(self.keypoints_held - self.keypoints_fixed, p=2, dim=-1).mean(-1)
-        self.keypoint_dist_finger_nut = torch.norm(self.keypoints_held - self.keypoints_finger_centered, p=2, dim=-1).mean(-1)
+        len = self.keypoints_held1.shape[0]
+        for i in range(len):
+            self.keypoints_held1[i, :, :] = torch.flip(self.keypoints_held, [0, 1])[len-1-i]
+        
+        len = self.keypoints_finger_centered1.shape[0]
+        for i in range(len):
+            self.keypoints_finger_centered1[i, :, :] = torch.flip(self.keypoints_finger_centered, [0, 1])[len-1-i]
+        
+        #print("self.held_base_pos", self.held_base_pos)
+        #print("self.fingertip_base_pos", self.fingertip_base_pos)
+        #print("self.target_held_base_pos", self.target_held_base_pos)
+        #self.keypoint_dist_target_nut = torch.norm(self.keypoints_held - self.keypoints_fixed, p=2, dim=-1).mean(-1)
+
+        self.keypoint_dist_target_nut = torch.norm(self.keypoints_held - self.keypoints_fixed, p=2, dim=-1).mean(-1) ## finger_target
+        self.keypoint_dist_finger_nut = torch.norm(self.keypoints_held - self.keypoints_finger_centered1, p=2, dim=-1).mean(-1)
+
+        #print(self.keypoint_dist_target_nut)
+        #print(self.keypoints_finger_centered1)
+        #print(self.keypoints_fixed)
+
+        #print(self.keypoint_dist_finger_nut)
+        #print(self.keypoints_held)
+
+
+        #print("self.held_base_pos", self.held_base_pos)
+        #print("self.fingertip_base_pos", self.fingertip_base_pos)
+        #print("self.target_held_base_pos", self.target_held_base_pos)
+        #print("self.keypoints_held", self.keypoints_held)
+        #print("self.keypoints_finger_centered", self.keypoints_finger_centered)
+        #print("self.keypoints_finger_centered1", self.keypoints_finger_centered1)
+        #print("self.keypoints_fixed", self.keypoints_fixed)
+        #raise KeyboardInterrupt
 
         self.last_update_timestamp = self._robot._data._sim_timestamp
 
@@ -397,7 +436,7 @@ class FactoryEnv(DirectRLEnv):
         #}
         
         obs_dict = {
-            "fingertip_pos_rel_fixed": self.fingertip_midpoint_pos - noisy_held_pos, ####### midpoint - nutpos  #######
+            "head_pos_rel_fixed": self.held_pos - self.fixed_pos_obs_frame, ####### midpoint - nutpos  #######
             "Pos_error": target_pos_error,
             "Axis_error": target_axis_angle_error,      
             "prev_actions": prev_actions,
@@ -506,7 +545,7 @@ class FactoryEnv(DirectRLEnv):
         # Interpret actions as target rot (axis-angle) displacements
         rot_actions = self.actions[:, 3:6]
         if self.cfg_task.unidirectional_rot:
-            rot_actions[:, 2] = (rot_actions[:, 2] + 1.0) * 0.5  # [0, 1]      # Need to change multioperation after gripper operation successfully
+            rot_actions[:, 2] = (rot_actions[:, 2] + 1.0) * 0.5  # [1, 0]      # Need to change multioperation after gripper operation successfully
         rot_actions = rot_actions * self.rot_threshold  
 
         self.ctrl_target_fingertip_midpoint_pos = self.fingertip_midpoint_pos + pos_actions
@@ -660,18 +699,15 @@ class FactoryEnv(DirectRLEnv):
 
     def _update_rew_buf(self, curr_successes):
         """Compute reward at current timestep."""
-        w1 = 0.6 # 0.6
-        w2 = 0.15
-        w3 = 0.25
-        w4 = 2
+        w1 = 0.3 # 0.6
+        w2 = 0.05
+        w3 = 0.00001
+        w4 = 1
 
-        threshold1 = 0.042
-        threshold2 = 0.036
-        threshold3 = 10
+        threshold1 = 0.034
+        threshold2 = 0.034 #0.036
+        threshold3 = 1.5
 
-        a00, b00 = [60, 4]  # General movement towards fixed object.
-        a11, b11 = [100, 1]  # Movement to align the assets.
-        a22, b22= [150, 0]
 
         a0, b0 = self.cfg_task.keypoint_coef_baseline
         a1, b1 = self.cfg_task.keypoint_coef_coarse
@@ -682,22 +718,15 @@ class FactoryEnv(DirectRLEnv):
         # Keypoint rewards.
         def squashing_fn(x, a, b):
             return 1 / (torch.exp(a * x) + b + torch.exp(-a * x))
-        
-        self.keypoint_dist_finger_nut1 = torch.where(self.keypoint_dist_finger_nut < 0.034, 
-                                                     self.keypoint_dist_finger_nut * 0.005/0.034, self.keypoint_dist_finger_nut)
-        self.keypoint_dist_finger_nut1 = torch.where((self.keypoint_dist_finger_nut >= 0.034)&(self.keypoint_dist_finger_nut < 0.06), 
-                                                     0.1154*self.keypoint_dist_finger_nut+0.00107, self.keypoint_dist_finger_nut1)
-        self.keypoint_dist_finger_nut1 = torch.where(self.keypoint_dist_finger_nut >= 0.06, 
-                                                     self.keypoint_dist_finger_nut, self.keypoint_dist_finger_nut1)
     
-        rew_dict["kp_baseline"] = squashing_fn(self.keypoint_dist_target_nut, a0, b0)
-        rew_dict["kp_baseline1"] = w1 * squashing_fn(self.keypoint_dist_finger_nut1, a00, b00)
+        rew_dict["kp_baseline1"] = w1 * squashing_fn(self.keypoint_dist_finger_nut, a0, b0)
+        #rew_dict["kp_baseline1"] = w1 * squashing_fn(self.keypoint_dist_finger_nut1, a00, b00)
         # a1, b1 = 25, 2
-        rew_dict["kp_coarse"] = squashing_fn(self.keypoint_dist_target_nut, a1, b1)
-        rew_dict["kp_coarse1"] = w1 * squashing_fn(self.keypoint_dist_finger_nut1, a11, b11)
+        rew_dict["kp_coarse1"] = w1 * squashing_fn(self.keypoint_dist_finger_nut, a1, b1)
+        #rew_dict["kp_coarse1"] = w1 * squashing_fn(self.keypoint_dist_finger_nut1, a11, b11)
         # a2, b2 = 300, 0
-        rew_dict["kp_fine"] = squashing_fn(self.keypoint_dist_target_nut, a2, b2)
-        rew_dict["kp_fine1"] = w1 * squashing_fn(self.keypoint_dist_finger_nut1, a22, b22)
+        rew_dict["kp_fine1"] = w1 * squashing_fn(self.keypoint_dist_finger_nut, a2, b2)
+        #rew_dict["kp_fine1"] = w1 * squashing_fn(self.keypoint_dist_finger_nut1, a22, b22)
 
         #############################################################################################################################
         "Need to remove"
@@ -714,12 +743,11 @@ class FactoryEnv(DirectRLEnv):
         ###############################################################################################################################
         first = torch.where(self.keypoint_dist_finger_nut> threshold1, 1, 0)             #### gripper opening 
         fisrtd = torch.where(self.gripper_pos_error_clipped > 0, self.gripper_pos_error_clipped, 0.)             #### gripper opening
-        rew_dict["gripper1"] = w3 * first * fisrtd
-        if (self.common_step_counter % (100000 // 128)) == 0:
-            print(self.keypoint_dist_finger_nut)
+        rew_dict["gripper1"] = 0.1 *w3 * first * fisrtd
+
         #raise KeyboardInterrupt
 
-        second = torch.where(self.keypoint_dist_finger_nut< threshold2, 1, 0)             #### gripper closing 
+        second = torch.where(self.keypoint_dist_finger_nut< threshold1, 1, 0)             #### gripper closing 
         secondd = torch.where(self.gripper_pos_error_clipped < 0, -self.gripper_pos_error_clipped, 0.)             #### gripper closing
         rew_dict["gripper2"] = w3 * second * secondd
 
@@ -728,40 +756,51 @@ class FactoryEnv(DirectRLEnv):
                                                                  + self.fingertip_midpoint_linvel[:,2] + self.fingertip_midpoint_angvel[:,0]
                                                                   + self.fingertip_midpoint_angvel[:,1] + self.fingertip_midpoint_angvel[:,2] )/6)))
         
-        fourth = torch.where(self.keypoint_dist_finger_nut < 0.0335, 1, 0)
-        fifth = torch.where( (abs(self.forearm_contact_forces_base[:,0]) > threshold3) & (abs(self.forearm_contact_forces_base[:,2]) > threshold3) 
-                            & (abs(self.forearm_contact_forces_base[:,2]) > threshold3) , 1, 0)    
+        fourth = torch.where(self.keypoint_dist_finger_nut < 0.001, 1, 0)
+        fifth = torch.where(self.keypoint_dist_finger_nut < 0.002, 1, 0)
+        #fifth = torch.where( (abs(self.forearm_contact_forces_base[:,0]) > threshold3) & (abs(self.forearm_contact_forces_base[:,2]) > threshold3) 
+        #                    & (abs(self.forearm_contact_forces_base[:,2]) > threshold3) , 1, 0)    
         
-        ############################ 2nd keypoint function ################################## 
+        ############################ 2nd keypoint function ############################################## 
 
-        rew_dict["kp_baseline2"] = fourth * fifth * w4 * squashing_fn(self.keypoint_dist_target_nut, a0, b0)
-        rew_dict["kp_coarse2"] = fourth * fifth * w4 * squashing_fn(self.keypoint_dist_target_nut, a1, b1)
-        rew_dict["kp_fine2"] = fourth * fifth * w4 * squashing_fn(self.keypoint_dist_target_nut, a2, b2)
+        rew_dict["kp_baseline2"] = fourth * w4 * squashing_fn(self.keypoint_dist_target_nut, a0, b0)
+        rew_dict["kp_coarse2"] = fourth * w4 * squashing_fn(self.keypoint_dist_target_nut, a1, b1)
+        rew_dict["kp_fine2"] = fourth * w4 * squashing_fn(self.keypoint_dist_target_nut, a2, b2)
 
         Grasp_successes = torch.ones((self.num_envs,), dtype=torch.bool, device=self.device)
-        rew_dict["Grasp"] = 0.5 * fourth * fifth * Grasp_successes
+        rew_dict["Grasp"] = 0.01 * fifth * Grasp_successes
+
+        #rew_dict["After_training"] = - self.keypoint_dist_target_nut - self.keypoint_dist_finger_nut
 
         rew_buf = (
-            rew_dict["kp_coarse"]
-            + rew_dict["kp_baseline"]
-            + rew_dict["kp_fine"]
-            + rew_dict["gripper"]
-            #rew_dict["kp_coarse1"]
-            #+ rew_dict["kp_baseline1"]
-            #+ rew_dict["kp_fine1"]
-            #+ rew_dict["gripper1"]
-            #+ rew_dict["gripper2"]
+            #rew_dict["kp_coarse"]
+            #+ rew_dict["kp_baseline"]
+            #+ rew_dict["kp_fine"]
+            #+ rew_dict["gripper"]
+            rew_dict["kp_coarse1"]
+            + rew_dict["kp_baseline1"]
+            + rew_dict["kp_fine1"]
+            + rew_dict["gripper1"]
+            + rew_dict["gripper2"]
             #+ rew_dict["ee_velocity"]
             - rew_dict["action_penalty"] * self.cfg_task.action_penalty_scale
             - rew_dict["action_grad_penalty"] * self.cfg_task.action_grad_penalty_scale
             + rew_dict["curr_engaged"]
             + rew_dict["curr_successes"]
             #+ rew_dict["Grasp"]
-            #+ rew_dict["kp_coarse1"]
-            #+ rew_dict["kp_baseline1"]
-            #+ rew_dict["kp_fine1"]
-
+            + rew_dict["kp_coarse2"]
+            + rew_dict["kp_baseline2"]
+            + rew_dict["kp_fine2"]
+           
         )
+
+        #print(rew_dict)
+
+        #if (self.common_step_counter % (100000 // 128)) == 0:
+        #    print("keypoint distance target nut", self.keypoint_dist_target_nut)
+        #    print("keypoint finger nut", self.keypoint_dist_finger_nut)
+        #    print("Contact forces", self.forearm_contact_forces_base)
+        #    print(rew_dict)
 
         for rew_name, rew in rew_dict.items():
             self.extras[f"logs_rew_{rew_name}"] = rew.mean()
@@ -789,10 +828,10 @@ class FactoryEnv(DirectRLEnv):
             thread_pitch = self.cfg_task.fixed_asset_cfg.thread_pitch
         """Move assets to default pose before randomization."""
 
-        held_state = self._fixed_asset.data.default_root_state.clone()[env_ids] 
+        held_state = self._held_asset.data.default_root_state.clone()[env_ids] 
         held_state[:, 0:3] += self.scene.env_origins[env_ids]
         held_state[:, 7:] = 0.0
-        held_state[:, 2] += thread_pitch*1.5
+        held_state[:, 2] += thread_pitch
         self._held_asset.write_root_link_pose_to_sim(held_state[:, 0:7], env_ids=env_ids)
         self._held_asset.write_root_com_velocity_to_sim(held_state[:, 7:], env_ids=env_ids)
         self._held_asset.reset()
@@ -931,8 +970,8 @@ class FactoryEnv(DirectRLEnv):
         # Compute the frame on the bolt that would be used as observation: fixed_pos_obs_frame
         # For example, the tip of the bolt can be used as the observation frame
         fixed_tip_pos_local = torch.zeros_like(self.fixed_pos)
-        #fixed_tip_pos_local[:, 2] += self.cfg_task.fixed_asset_cfg.height
-        #fixed_tip_pos_local[:, 2] += self.cfg_task.fixed_asset_cfg.base_height
+        fixed_tip_pos_local[:, 2] += self.cfg_task.fixed_asset_cfg.height
+        fixed_tip_pos_local[:, 2] += self.cfg_task.fixed_asset_cfg.base_height
         
         _, fixed_tip_pos = torch_utils.tf_combine(
             self.fixed_quat, self.fixed_pos, self.identity_quat, fixed_tip_pos_local
@@ -1014,7 +1053,7 @@ class FactoryEnv(DirectRLEnv):
         #)
 
         #translated_held_asset_quat, translated_held_asset_pos = torch_utils.tf_combine(
-        #    q1=fingertip_flipped_quat, t1=fingertip_flipped_pos, q2=asset_in_hand_quat, t2=asset_in_hand_pos
+        #    self.fixed_quat, self.fixed_pos, q2=self.identity_quat, t2=asset_in_hand_pos
         #)
 
         ## Add asset in hand randomization
@@ -1024,16 +1063,16 @@ class FactoryEnv(DirectRLEnv):
         #held_asset_pos_noise = torch.tensor(self.cfg_task.held_asset_pos_noise, device=self.device)
         #self.held_asset_pos_noise = self.held_asset_pos_noise @ torch.diag(held_asset_pos_noise)
         #translated_held_asset_quat, translated_held_asset_pos = torch_utils.tf_combine(
-        #    q1=translated_held_asset_quat,
-        #    t1=translated_held_asset_pos,
+        #    q1=self.fixed_quat,
+        #    t1=self.fixed_pos,
         #    q2=self.identity_quat,
-        #    t2=self.held_asset_pos_noise,
+        #    t2=fixed_tip_pos_local,
         #)
 
-        #held_state = self._held_asset.data.default_root_state.clone()
-        #held_state[:, 0:3] = translated_held_asset_pos + self.scene.env_origins
-        #held_state[:, 3:7] = translated_held_asset_quat
-        #held_state[:, 7:] = 0.0
+        held_state = self._held_asset.data.default_root_state.clone()
+        held_state[:, 0:3] = self.fixed_pos + self.scene.env_origins
+        held_state[:, 3:7] = self.fixed_quat
+        held_state[:, 7:] = 0.0
 
         if self.cfg_task.name == "nut_thread":
             head_height = self.cfg_task.fixed_asset_cfg.base_height
@@ -1042,8 +1081,9 @@ class FactoryEnv(DirectRLEnv):
             thread_pitch = self.cfg_task.fixed_asset_cfg.thread_pitch
         
         ############ for changing the heigth of bolt #################################
-        held_state=fixed_state
-        held_state[:,2]+= thread_pitch 
+        #held_state=fixed_state
+        #held_state[:,2] += thread_pitch 
+        held_state[:,2] += head_height
         ############ for changing the heigth of bolt #################################
         
         held_orn_init_yaw = np.deg2rad(self.cfg_task.held_asset_rot_init)

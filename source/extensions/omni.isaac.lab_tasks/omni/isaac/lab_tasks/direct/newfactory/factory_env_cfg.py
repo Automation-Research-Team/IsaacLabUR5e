@@ -43,7 +43,7 @@ from .factory_tasks_cfg import ASSET_DIR, FactoryTask, NutThread
 
 
 OBS_DIM_CFG = {
-    "fingertip_pos_rel_fixed": 3,
+    "head_pos_rel_fixed": 3,
     "Pos_error": 3,
     "Axis_error": 3,
     "error_ee_linvel": 3,
@@ -123,8 +123,8 @@ class FactoryEnvCfg(DirectRLEnvCfg):
     #    "held_quat",
     #    "fixed_pos",
     #    "fixed_quat",
-    #]
-    obs_order: list[str] = ["fingertip_pos_rel_fixed", "Pos_error", "Axis_error", "error_ee_linvel", "error_ee_angvel", "tool_Force", "tool_Torque"] 
+    #]  
+    obs_order: list[str] = ["head_pos_rel_fixed", "Pos_error", "Axis_error", "error_ee_linvel", "error_ee_angvel", "tool_Force", "tool_Torque"]  # "fingertip_pos_rel_fixed",
     state_order: list[str] = [
         "Pos_error", 
         "Axis_error", 
@@ -219,8 +219,8 @@ class FactoryEnvCfg(DirectRLEnvCfg):
         actuators={
             "panda_arm1": ImplicitActuatorCfg(
                 joint_names_expr=["panda_joint[1-4]"],
-                stiffness= 300, #400, #7500.0,
-                damping= 35 ,# 80, #173.0,
+                stiffness= 400, #300, #7500.0,
+                damping= 80 ,# 35, #80, #173.0,
                 friction=0.1,
                 armature=0.0,
                 effort_limit=87.0,
@@ -228,8 +228,8 @@ class FactoryEnvCfg(DirectRLEnvCfg):
             ),
             "panda_arm2": ImplicitActuatorCfg(
                 joint_names_expr=["panda_joint[5-7]"],
-                stiffness= 300 , #400, #7500.0,
-                damping= 35 , # 80, #173.0,
+                stiffness= 400, #7500.0,
+                damping= 80, #173.0,
                 friction=0.1,
                 armature=0.0,
                 effort_limit=12.0,

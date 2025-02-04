@@ -3,6 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+import os
 import numpy as np
 import omni.isaac.lab.sim as sim_utils
 from omni.isaac.lab.assets import ArticulationCfg
@@ -10,7 +11,7 @@ from omni.isaac.lab.utils import configclass
 from omni.isaac.lab.utils.assets import ISAACLAB_NUCLEUS_DIR
 
 ASSET_DIR = f"{ISAACLAB_NUCLEUS_DIR}/Factory"
-
+LOCAL_ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
 @configclass
 class FixedAssetCfg:
@@ -454,8 +455,11 @@ class NutThread(FactoryUR5eTask):
 @configclass
 class NutUnthread(FactoryUR5eTask):
     name = "nut_unthread"
-    fixed_asset_cfg = BoltM16()
-    held_asset_cfg = NutM16()
+
+    use_damaged_assets = False
+    fixed_asset_cfg = BoltM16(usd_path=os.path.join(LOCAL_ASSET_DIR, "usd", "bolt", ("default" if not use_damaged_assets else "damaged"), "factory_bolt_m16.usd"))
+    held_asset_cfg = NutM16(usd_path=os.path.join(LOCAL_ASSET_DIR, "usd", "nut", ("default" if not use_damaged_assets else "damaged"), "factory_nut_m16.usd"))
+
     asset_size = 16.0
     duration_s = 30.0
 

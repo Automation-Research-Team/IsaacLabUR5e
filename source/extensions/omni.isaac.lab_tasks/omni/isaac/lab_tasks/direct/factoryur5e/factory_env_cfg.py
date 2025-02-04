@@ -61,6 +61,7 @@ class ObsRandCfg:
 class CtrlCfg:
     using_position_control = True
     using_gripper_action = True
+    gripper_starts_closed = False
     ema_factor = 0.2
 
     gripper_action_bound = 0.005

@@ -3,6 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+import os
 import numpy as np
 import omni.isaac.lab.sim as sim_utils
 from omni.isaac.lab.assets import ArticulationCfg
@@ -10,7 +11,7 @@ from omni.isaac.lab.utils import configclass
 from omni.isaac.lab.utils.assets import ISAACLAB_NUCLEUS_DIR
 
 ASSET_DIR = f"{ISAACLAB_NUCLEUS_DIR}/Factory"
-
+LOCAL_ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
 @configclass
 class FixedAssetCfg:
@@ -72,6 +73,7 @@ class FactoryUR5eTask:
     ee_success_yaw: float = 0.0  # nut_thread task only.
     action_penalty_scale: float = 0.0
     action_grad_penalty_scale: float = 0.0
+    held_to_fingertip_dist_penalty_scale: float = -2.5
     # Reward function details can be found in Appendix B of https://arxiv.org/pdf/2408.04587.
     # Multi-scale keypoints are used to capture different phases of the task.
     # Each reward passes the keypoint distance, x, through a squashing function:
@@ -453,8 +455,11 @@ class NutThread(FactoryUR5eTask):
 @configclass
 class NutUnthread(FactoryUR5eTask):
     name = "nut_unthread"
-    fixed_asset_cfg = BoltM16()
-    held_asset_cfg = NutM16()
+
+    use_damaged_assets = False
+    fixed_asset_cfg = BoltM16(usd_path=os.path.join(LOCAL_ASSET_DIR, "usd", "bolt", ("default" if not use_damaged_assets else "damaged"), "factory_bolt_m16.usd"))
+    held_asset_cfg = NutM16(usd_path=os.path.join(LOCAL_ASSET_DIR, "usd", "nut", ("default" if not use_damaged_assets else "damaged"), "factory_nut_m16.usd"))
+
     asset_size = 16.0
     duration_s = 30.0
 

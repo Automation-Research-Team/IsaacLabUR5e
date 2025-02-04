@@ -163,7 +163,7 @@ class FactoryUR5eEnv(DirectRLEnv):
             if type(self.cfg_task.fixed_asset_cfg) != BoltM16:
                 raise TypeError(f"Expected fixed asset to be of type BoltM16 got : {type(self.cfg_task.fixed_asset_cfg)}")
             thread_pitch = self.cfg_task.fixed_asset_cfg.thread_pitch
-            self.fixed_success_pos_local[:, 2] = head_height + shank_length + 0.012
+            self.fixed_success_pos_local[:, 2] = head_height + shank_length + (5 * thread_pitch)
         else:
             raise NotImplementedError("Task not implemented")
 
@@ -335,6 +335,7 @@ class FactoryUR5eEnv(DirectRLEnv):
             )[1]
 
         self.keypoint_dist = torch.norm(self.keypoints_held - self.keypoints_fixed, p=2, dim=-1).mean(-1)
+        self.held_fingertip_midpoint_dist = torch.linalg.norm(self.held_base_pos-self.fingertip_midpoint_pos,  dim=1, ord=2)
         self.extras["mean_keypoint_dist"] = self.keypoint_dist.mean().cpu().numpy().item()
         self.last_update_timestamp = self._robot._data._sim_timestamp
         self._update_curr_base_contact_fts()
@@ -422,7 +423,7 @@ class FactoryUR5eEnv(DirectRLEnv):
     def close_gripper_in_place(self):
         """Keep gripper in current position as gripper closes."""
         actions = torch.zeros((self.num_envs, 6), device=self.device)
-        ctrl_target_gripper_dof_pos = 0.0
+        ctrl_target_gripper_dof_pos = 0.0 if not self.cfg.ctrl.using_gripper_action else -(self.joint_pos[:, -2:])
 
         # Interpret actions as target pos displacements and set pos target
         pos_actions = actions[:, 0:3] * self.pos_threshold
@@ -517,6 +518,12 @@ class FactoryUR5eEnv(DirectRLEnv):
 
     def generate_ctrl_signals(self):
         """Get Jacobian. Set UR5e DOF position targets (fingers) or DOF torques (arm)."""
+
+        if self.cfg.ctrl.using_gripper_action:
+            self.ctrl_target_joint_pos[:, 6:8] = self.joint_pos[:, 6:8] + self.ctrl_target_gripper_dof_pos
+        else:
+            self.ctrl_target_joint_pos[:, 6:8] = self.ctrl_target_gripper_dof_pos
+
         if self.cfg.ctrl.using_position_control:
             pos_error, axis_angle_error = fc.get_pose_error(
                 fingertip_midpoint_pos=self.fingertip_midpoint_pos,
@@ -536,8 +543,7 @@ class FactoryUR5eEnv(DirectRLEnv):
                 device=self.device,
             )
 
-            self.ctrl_target_joint_pos[:, 0:6] = self.joint_pos[:, 0:6] + delta_arm_dof_pos
-            self.ctrl_target_joint_pos[:, 6:8] = self.joint_pos[:, 6:8] + self.ctrl_target_gripper_dof_pos
+            self.ctrl_target_joint_pos[:, 0:6] = self.joint_pos[:, 0:6] + delta_arm_dof_pos      
             self._robot.set_joint_position_target(self.ctrl_target_joint_pos)
         else:
             self.joint_torque, self.applied_wrench = fc.compute_dof_torque(
@@ -557,10 +563,8 @@ class FactoryUR5eEnv(DirectRLEnv):
                 device=self.device,
             )
 
-            # set target for gripper joints to use physx's PD controller
-            self.ctrl_target_joint_pos[:, 6:8] = self.ctrl_target_gripper_dof_pos
             self.joint_torque[:, 6:8] = 0.0
-
+            # set target for gripper joints to use physx's PD controller
             self._robot.set_joint_position_target(self.ctrl_target_joint_pos)
             self._robot.set_joint_effort_target(self.joint_torque)
 
@@ -614,7 +618,7 @@ class FactoryUR5eEnv(DirectRLEnv):
             new_success_times_total = new_success_times.sum().item()
             self.recent_success_times_total += new_success_times_total
 
-        if (self.num_recent_resets % self.success_rate_window) == 0:
+        if (self.num_recent_resets > 0) and (self.num_recent_resets % self.success_rate_window) == 0:
 
             success_rate = self.num_recent_successes / self.success_rate_window
             self.success_rate = success_rate
@@ -668,6 +672,7 @@ class FactoryUR5eEnv(DirectRLEnv):
             self._get_curr_successes(success_threshold=self.cfg_task.engage_threshold, check_rot=False).clone().float()
         )
         rew_dict["curr_successes"] = curr_successes.clone().float()
+        rew_dict["held_fingertip_midpoint_dist"] = self.held_fingertip_midpoint_dist
 
         rew_buf = (
             rew_dict["kp_coarse"]
@@ -677,6 +682,7 @@ class FactoryUR5eEnv(DirectRLEnv):
             - rew_dict["action_grad_penalty"] * self.cfg_task.action_grad_penalty_scale
             + rew_dict["curr_engaged"]
             + rew_dict["curr_successes"]
+            + rew_dict["held_fingertip_midpoint_dist"] * self.cfg_task.held_to_fingertip_dist_penalty_scale
         )
 
         for rew_name, rew in rew_dict.items():
@@ -1008,13 +1014,14 @@ class FactoryUR5eEnv(DirectRLEnv):
 
         self.step_sim_no_action()
 
-        grasp_time = 0.0
-        while grasp_time < 0.25:
-            self.ctrl_target_joint_pos[env_ids, 6:] = 0.0  # Close gripper.
-            self.ctrl_target_gripper_dof_pos = 0.0
-            self.close_gripper_in_place()
-            self.step_sim_no_action()
-            grasp_time += self.sim.get_physics_dt()
+        if self.cfg.ctrl.gripper_starts_closed:
+            grasp_time = 0.0
+            while grasp_time < 0.25:
+                self.ctrl_target_joint_pos[env_ids, 6:] = 0.0 # Close gripper.
+                self.ctrl_target_gripper_dof_pos = 0.0 if not self.cfg.ctrl.using_gripper_action else -(self.joint_pos[:, -2:])
+                self.close_gripper_in_place()
+                self.step_sim_no_action()
+                grasp_time += self.sim.get_physics_dt()
 
         self.prev_joint_pos = self.joint_pos[:, 0:6].clone()
         self.prev_fingertip_pos = self.fingertip_midpoint_pos.clone()

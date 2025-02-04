@@ -59,8 +59,9 @@ class ObsRandCfg:
 
 @configclass
 class CtrlCfg:
-    using_position_control = False
-    using_gripper_action = False
+    using_position_control = True
+    using_gripper_action = True
+    gripper_starts_closed = False
     ema_factor = 0.2
 
     gripper_action_bound = 0.005
@@ -211,13 +212,13 @@ class FactoryUR5eEnvCfg(DirectRLEnvCfg):
                 max_angular_velocity=3666.0,
                 enable_gyroscopic_forces=True,
                 solver_position_iteration_count=255,
-                solver_velocity_iteration_count=0,
+                solver_velocity_iteration_count=2,
                 max_contact_impulse=1e32,
             ),
             articulation_props=sim_utils.ArticulationRootPropertiesCfg(
                 enabled_self_collisions=False,
                 solver_position_iteration_count=255,
-                solver_velocity_iteration_count=0,
+                solver_velocity_iteration_count=2,
             ),
             collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.005, rest_offset=0.0),
         ),
@@ -268,4 +269,4 @@ class FactoryUR5eTaskNutThreadCfg(FactoryUR5eEnvCfg):
 class FactoryUR5eTaskNutUnthreadCfg(FactoryUR5eEnvCfg):
     task_name = "nut_unthread"
     task = NutUnthread()
-    episode_length_s = 30.0
+    episode_length_s = 60.0

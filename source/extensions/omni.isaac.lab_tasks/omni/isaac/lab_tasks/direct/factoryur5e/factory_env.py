@@ -163,7 +163,7 @@ class FactoryUR5eEnv(DirectRLEnv):
             if type(self.cfg_task.fixed_asset_cfg) != BoltM16:
                 raise TypeError(f"Expected fixed asset to be of type BoltM16 got : {type(self.cfg_task.fixed_asset_cfg)}")
             thread_pitch = self.cfg_task.fixed_asset_cfg.thread_pitch
-            self.fixed_success_pos_local[:, 2] = head_height + shank_length + 0.012
+            self.fixed_success_pos_local[:, 2] = head_height + shank_length + thread_pitch * 5
         else:
             raise NotImplementedError("Task not implemented")
 
@@ -271,7 +271,7 @@ class FactoryUR5eEnv(DirectRLEnv):
         self.scene.cfg.__dict__["robot_fingertip_to_base_frame_transformer"] = self.cfg.robot_fingertip_to_base_frame_transformer
         self.scene._add_entities_from_cfg() # type: ignore
         self._robot_fingertip_to_base_frame_transformer = self.scene.sensors["robot_fingertip_to_base_frame_transformer"]
-
+        
     def _compute_intermediate_values(self, dt):
         """Get values computed from raw tensors. This includes adding noise."""
         # TODO: A lot of these can probably only be set once?
@@ -314,6 +314,11 @@ class FactoryUR5eEnv(DirectRLEnv):
         self.joint_vel_fd = joint_diff / dt
         self.prev_joint_pos = self.joint_pos[:, 0:6].clone()
 
+        #print(self.fingertip_midpoint_pos.shape)
+         
+        self.fingertip_midpoint_pos1 = self.fingertip_midpoint_pos.clone()
+        self.fingertip_midpoint_pos1[:,2] -= 0.5*self.cfg_task.held_asset_cfg.height
+               
         # Keypoint tensors.
         self.held_base_quat[:], self.held_base_pos[:] = torch_utils.tf_combine(
             self.held_quat, self.held_pos, self.held_base_quat_local, self.held_base_pos_local
@@ -322,6 +327,13 @@ class FactoryUR5eEnv(DirectRLEnv):
             self.fixed_quat, self.fixed_pos, self.identity_quat, self.fixed_success_pos_local
         )
 
+        #print(self.fingertip_midpoint_pos[0,:])
+        #print(self.fingertip_midpoint_pos1[0,:])
+        #print(self.held_base_pos)
+        #raise KeyboardInterrupt
+
+        self.key_point_fingertip_nut_distance = torch.linalg.norm(self.held_base_pos - self.fingertip_midpoint_pos1, dim=1, ord = 2)
+        
         # Compute pos of keypoints on held asset, and fixed asset in world frame
         for idx, keypoint_offset in enumerate(self.keypoint_offsets):
             self.keypoints_held[:, idx] = torch_utils.tf_combine(
@@ -537,7 +549,12 @@ class FactoryUR5eEnv(DirectRLEnv):
             )
 
             self.ctrl_target_joint_pos[:, 0:6] = self.joint_pos[:, 0:6] + delta_arm_dof_pos
-            self.ctrl_target_joint_pos[:, 6:8] = self.joint_pos[:, 6:8] + self.ctrl_target_gripper_dof_pos
+            
+            if self.cfg.ctrl.using_gripper_action:
+                self.ctrl_target_joint_pos[:, 6:8] = self.joint_pos[:, 6:8] + self.ctrl_target_gripper_dof_pos
+            else:
+                self.ctrl_target_joint_pos[:, 6:8] = self.ctrl_target_gripper_dof_pos
+
             self._robot.set_joint_position_target(self.ctrl_target_joint_pos)
         else:
             self.joint_torque, self.applied_wrench = fc.compute_dof_torque(
@@ -598,6 +615,8 @@ class FactoryUR5eEnv(DirectRLEnv):
         if check_rot:
             is_rotated = self.curr_yaw > self.cfg_task.ee_success_yaw
             curr_successes = torch.logical_and(curr_successes, is_rotated)
+
+            #print(f"success {torch.any(curr_successes)} {z_disp} must be less than {height_threshold}, {is_centered} must be less than 0.0025, {check_rot} must be greater than {self.cfg_task.ee_success_yaw}")
 
         return curr_successes
     
@@ -669,6 +688,10 @@ class FactoryUR5eEnv(DirectRLEnv):
         )
         rew_dict["curr_successes"] = curr_successes.clone().float()
 
+        rew_dict["nut_midpoint"] = -2*self.key_point_fingertip_nut_distance
+        
+        print(self.key_point_fingertip_nut_distance[0])
+
         rew_buf = (
             rew_dict["kp_coarse"]
             + rew_dict["kp_baseline"]
@@ -677,6 +700,7 @@ class FactoryUR5eEnv(DirectRLEnv):
             - rew_dict["action_grad_penalty"] * self.cfg_task.action_grad_penalty_scale
             + rew_dict["curr_engaged"]
             + rew_dict["curr_successes"]
+            + rew_dict["nut_midpoint"]
         )
 
         for rew_name, rew in rew_dict.items():
@@ -878,6 +902,9 @@ class FactoryUR5eEnv(DirectRLEnv):
         )
         self.fixed_pos_obs_frame[:] = fixed_tip_pos
 
+        #print("fixed_state[:, 0:3]", fixed_state[:, 0:3])
+        #print("fixed_state[:, 3:7]", fixed_state[:, 3:7])
+
         # (2) Move gripper to randomizes location above fixed asset. Keep trying until IK succeeds.
         # (a) get position vector to target
         bad_envs = env_ids.clone()
@@ -965,16 +992,31 @@ class FactoryUR5eEnv(DirectRLEnv):
             t2=torch.zeros_like(self.fingertip_midpoint_pos),
         )
 
+        #print("self.fingertip_midpoint_quat", self.fingertip_midpoint_quat)
+        #print("self.fingertip_midpoint_pos", self.fingertip_midpoint_pos)
+        #print("fingertip_flipped_quat", fingertip_flipped_quat)
+        #print("fingertip_flipped_pos", fingertip_flipped_pos)
+
         # get default gripper in asset transform
         held_asset_relative_pos, held_asset_relative_quat = self.get_handheld_asset_relative_pose()
         asset_in_hand_quat, asset_in_hand_pos = torch_utils.tf_inverse(
             held_asset_relative_quat, held_asset_relative_pos
         )
 
+        #print("held_asset_relative_pos", held_asset_relative_pos)
+        #print("held_asset_relative_quat", held_asset_relative_quat)
+
+        #print("asset_in_hand_quat", asset_in_hand_quat)
+        #print("asset_in_hand_pos", asset_in_hand_pos)
+
         translated_held_asset_quat, translated_held_asset_pos = torch_utils.tf_combine(
             q1=fingertip_flipped_quat, t1=fingertip_flipped_pos, q2=asset_in_hand_quat, t2=asset_in_hand_pos
         )
 
+        #print("translated_held_asset_quat", translated_held_asset_quat)
+        #print("translated_held_asset_pos", translated_held_asset_pos)
+
+        
         # Add asset in hand randomization
         rand_sample = torch.rand((self.num_envs, 3), dtype=torch.float32, device=self.device)
         self.held_asset_pos_noise = 2 * (rand_sample - 0.5)  # [-1, 1]
@@ -997,6 +1039,11 @@ class FactoryUR5eEnv(DirectRLEnv):
         self._held_asset.write_root_link_pose_to_sim(held_state[:, 0:7])
         self._held_asset.write_root_com_velocity_to_sim(held_state[:, 7:])
         self._held_asset.reset()
+
+        #print("held_state[:, 0:3]", held_state[:, 0:3])
+        #print("held_state[:, 3:7]", held_state[:, 3:7])
+
+        #raise KeyboardInterrupt
 
         #  Close hand
         # Set gains to use for quick resets.

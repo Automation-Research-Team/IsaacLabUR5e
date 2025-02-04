@@ -59,8 +59,8 @@ class ObsRandCfg:
 
 @configclass
 class CtrlCfg:
-    using_position_control = False
-    using_gripper_action = False
+    using_position_control = True
+    using_gripper_action = True
     ema_factor = 0.2
 
     gripper_action_bound = 0.005
@@ -116,7 +116,7 @@ class CtrlCfg:
                 joint_names_expr=["ur5e_joint[1-3]"],
                 stiffness=800,
                 damping=40,
-                friction=0.0,
+                friction=0.1,
                 armature=0.0,
                 effort_limit=87,
                 velocity_limit=100,
@@ -125,17 +125,17 @@ class CtrlCfg:
                 joint_names_expr=["ur5e_joint[4-6]"],
                 stiffness=800,
                 damping=40,
-                friction=0.0,
+                friction=0.1,
                 armature=0.0,
                 effort_limit=87,
                 velocity_limit=100,
             ),
             "ur5e_hand": ImplicitActuatorCfg(
                 joint_names_expr=["ur5e_finger_joint.*"],
-                effort_limit=40.0,
-                velocity_limit=0.04,
-                stiffness=7500.0,
-                damping=173.0,
+                effort_limit=200.0,
+                velocity_limit=0.2,
+                stiffness=2e3,
+                damping=1e2,
                 friction=0.1,
                 armature=0.0,
             ),
@@ -187,7 +187,7 @@ class FactoryUR5eEnvCfg(DirectRLEnvCfg):
             gpu_max_rigid_contact_count=2**23,
             gpu_max_rigid_patch_count=2**23,
             gpu_max_num_partitions=1,  # Important for stable simulation.
-            gpu_collision_stack_size=2**28
+            gpu_collision_stack_size=2**30
         ),
         physics_material=RigidBodyMaterialCfg(
             static_friction=1.0,
@@ -211,13 +211,13 @@ class FactoryUR5eEnvCfg(DirectRLEnvCfg):
                 max_angular_velocity=3666.0,
                 enable_gyroscopic_forces=True,
                 solver_position_iteration_count=255,
-                solver_velocity_iteration_count=0,
+                solver_velocity_iteration_count=2,
                 max_contact_impulse=1e32,
             ),
             articulation_props=sim_utils.ArticulationRootPropertiesCfg(
                 enabled_self_collisions=False,
                 solver_position_iteration_count=255,
-                solver_velocity_iteration_count=0,
+                solver_velocity_iteration_count=2,
             ),
             collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.005, rest_offset=0.0),
         ),
@@ -268,4 +268,4 @@ class FactoryUR5eTaskNutThreadCfg(FactoryUR5eEnvCfg):
 class FactoryUR5eTaskNutUnthreadCfg(FactoryUR5eEnvCfg):
     task_name = "nut_unthread"
     task = NutUnthread()
-    episode_length_s = 30.0
+    episode_length_s = 80.0

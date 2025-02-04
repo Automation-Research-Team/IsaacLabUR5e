@@ -116,7 +116,7 @@ def export_mesh(path: str | os.PathLike, mesh: SurfaceMesh, omni_template_path: 
             stage_ref = Usd.Stage.Open(instanceables_path) # type: ignore
             mat_prim = stage_ref.GetPrimAtPath(os.path.join(instanceables_scene_path, "Looks", f"{os.path.split(mesh.materials[0].material_name)[-1]}", "Shader"))
             mat_prim = UsdShade.Shader(mat_prim) # type: ignore
-            mat_prim.CreateInput("diffuse_texture", Sdf.ValueTypeNames.Asset).Set(texture_path) # type: ignore
+            mat_prim.CreateInput("diffuse_texture", Sdf.ValueTypeNames.Asset).Set(os.path.relpath(texture_path, start=os.path.dirname(instanceables_path))) # type: ignore
 
         kal.io.usd.export_mesh(file_path=instanceables_path,
             scene_path=os.path.join(instanceables_scene_mesh_path, "visuals"),

@@ -46,6 +46,7 @@ parser.add_argument(
     choices=["PPO", "IPPO", "MAPPO"],
     help="The RL algorithm used for training the skrl agent.",
 )
+parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint.")
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -147,6 +148,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # set directory into agent config
     agent_cfg["agent"]["experiment"]["directory"] = log_root_path
     agent_cfg["agent"]["experiment"]["experiment_name"] = log_dir
+    # get checkpoint path
+    if args_cli.checkpoint:
+        resume_path = os.path.abspath(args_cli.checkpoint)
     # update log_dir
     log_dir = os.path.join(log_root_path, log_dir)
 
@@ -181,6 +185,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # configure and instantiate the skrl runner
     # https://skrl.readthedocs.io/en/latest/api/utils/runner.html
     runner = Runner(env, agent_cfg)
+
+    if args_cli.checkpoint:
+        print(f"[INFO] Loading model checkpoint from: {resume_path}")
+        runner.agent.load(resume_path)
 
     # Add a wrapped method to the agent to record extra metrics
     # A better long term solution might be to create agent wrapper classes which call methods on a contained instance, similar to gymnasium wrappers
